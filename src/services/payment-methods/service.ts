@@ -180,10 +180,14 @@ export const updatePaymentMethodService = async (
     }
   }
 
+  // field diambil eksplisit, tidak pakai ...input, supaya kolom kepemilikan
+  // (user_id/owner_id) tidak bisa ikut tertimpa lewat body request
   await updatePaymentMethod(
     id,
     {
-      ...input,
+      key_payment_param_id: effectiveKeyParamId,
+      method_payment_param_id: effectiveMethodParamId,
+      ...(input.active !== undefined && { active: input.active }),
       updated_by: requester.email,
     },
     t
