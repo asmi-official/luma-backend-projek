@@ -121,6 +121,7 @@ User.init(
     agree: {
       type: DataTypes.BOOLEAN,
       allowNull: false,
+      defaultValue: true,
       validate: {
         notNull: { msg: 'Persetujuan syarat dan ketentuan wajib diisi' },
         isTrue(value: boolean) {
