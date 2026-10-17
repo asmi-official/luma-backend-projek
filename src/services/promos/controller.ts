@@ -15,18 +15,16 @@ import { parseFilterQuery, parseSortQuery, buildWhereFromFilters, buildOrderFrom
 
 const PROMO_FILTERABLE_KEYS = [
   'id',
-  'code',
   'name',
   'discount_type',
   'discount_value',
-  'special_price',
-  'min_purchase',
-  'max_discount',
+  'discount_text',
+  'discount_description',
   'start_date',
   'end_date',
-  'usage_limit',
-  'usage_count',
-  'active',
+  'start_time',
+  'end_time',
+  'status',
   'user_id',
   'owner_id',
   'created_at',
@@ -73,18 +71,26 @@ export const getAllPromos = async (req: Request, res: Response): Promise<void> =
     const { user_id, role } = req.user!;
     const { where, order } = buildPromoQueryOptions(req);
     const { page, limit } = parsePagination(req.query as Record<string, unknown>);
+    const { search } = req.query as { search?: string };
 
-    const { rows, count } = await getAllPromosService(
-      { user_id, role },
-      where,
-      order,
-      page,
-      limit,
-      t,
-    );
+    const {
+      rows,
+      count,
+      total_promo,
+      total_aktif,
+      total_terjadwal,
+      total_selesai,
+      total_nonaktif,
+    } = await getAllPromosService({ user_id, role }, where, order, page, limit, t, search);
 
     await t.commit();
-    sendPaginated(res, rows, count, { page, limit }, 'Berhasil mengambil data promo');
+    sendPaginated(res, rows, count, { page, limit }, 'Berhasil mengambil data promo', {
+      total_promo,
+      total_aktif,
+      total_terjadwal,
+      total_selesai,
+      total_nonaktif,
+    });
   } catch (err) {
     await t.rollback();
     handleError(err, res);
@@ -161,9 +167,8 @@ export const togglePromoActive = async (req: Request, res: Response): Promise<vo
       t,
     );
 
-    const statusLabel = result?.active ? 'diaktifkan' : 'dinonaktifkan';
     await t.commit();
-    sendSuccess(res, result, `Promo berhasil ${statusLabel}`);
+    sendSuccess(res, result, `Status promo berhasil diubah menjadi ${result?.status}`);
   } catch (err) {
     await t.rollback();
     handleError(err, res);

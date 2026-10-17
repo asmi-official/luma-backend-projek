@@ -7,21 +7,30 @@ import sequelize from '../../databases';
 // - special_price : Harga Spesial (harga tetap khusus, contoh: Rp 100.000)
 export type DiscountType = 'percentage' | 'fixed' | 'special_price';
 
+// status promo:
+// - Aktif      : sedang berjalan
+// - Terjadwal  : belum mulai, menunggu tanggal mulai
+// - Nonaktif   : dimatikan manual
+// - Selesai    : masa berlakunya sudah lewat
+export type PromoStatus = 'Aktif' | 'Terjadwal' | 'Nonaktif' | 'Selesai';
+
+export const PROMO_STATUSES: PromoStatus[] = ['Aktif', 'Terjadwal', 'Nonaktif', 'Selesai'];
+
+// kolom DECIMAL dikembalikan Sequelize sebagai string supaya presisi tidak hilang,
+// jadi tipenya string — bukan number
 export interface PromoAttributes {
   id: string;
-  code: string;
   name: string;
   description?: string | null;
   discount_type: DiscountType;
-  discount_value: number;       // untuk percentage → nilai %, untuk fixed → nominal potongan
-  special_price?: number | null; // harga spesial (hanya diisi jika discount_type = 'special_price')
-  min_purchase: number;
-  max_discount?: number | null;  // batas maksimal diskon (relevan untuk percentage)
-  start_date: Date;
-  end_date: Date;
-  usage_limit?: number | null;
-  usage_count: number;
-  active: boolean;
+  discount_value: string;          // percentage → nilai %, fixed → nominal, special_price → harga tetap
+  discount_text?: string | null;        // label diskon yang ditampilkan, contoh: 'Diskon 20%'
+  discount_description?: string | null;  // keterangan tambahan soal diskonnya
+  start_date: string;              // DATEONLY → 'YYYY-MM-DD'
+  end_date: string;
+  start_time?: string | null;      // TIME → 'HH:mm:ss', null = tanpa batas jam
+  end_time?: string | null;
+  status: PromoStatus;
   user_id: string;
   owner_id: string;
   created_at?: Date;
@@ -37,31 +46,28 @@ export interface PromoCreationAttributes
     PromoAttributes,
     | 'id'
     | 'description'
-    | 'special_price'
-    | 'min_purchase'
-    | 'max_discount'
-    | 'usage_limit'
-    | 'usage_count'
-    | 'active'
+    | 'discount_text'
+    | 'discount_description'
+    | 'start_time'
+    | 'end_time'
+    | 'status'
     | 'deleted_at'
     | 'deleted_by'
   > {}
 
 class Promo extends Model<PromoAttributes, PromoCreationAttributes> implements PromoAttributes {
   declare id: string;
-  declare code: string;
   declare name: string;
   declare description: string | null;
   declare discount_type: DiscountType;
-  declare discount_value: number;
-  declare special_price: number | null;
-  declare min_purchase: number;
-  declare max_discount: number | null;
-  declare start_date: Date;
-  declare end_date: Date;
-  declare usage_limit: number | null;
-  declare usage_count: number;
-  declare active: boolean;
+  declare discount_value: string;
+  declare start_date: string;
+  declare end_date: string;
+  declare discount_text: string | null;
+  declare discount_description: string | null;
+  declare start_time: string | null;
+  declare end_time: string | null;
+  declare status: PromoStatus;
   declare user_id: string;
   declare owner_id: string;
   declare created_at: Date;
@@ -70,6 +76,20 @@ class Promo extends Model<PromoAttributes, PromoCreationAttributes> implements P
   declare updated_by: string;
   declare deleted_at: Date | null;
   declare deleted_by: string | null;
+
+  // dipanggil loader di databases/index.ts setelah semua model ter-import.
+  // model diakses lewat parameter `models`, bukan import, supaya tidak circular
+  static associate(models: Record<string, any>): void {
+    // constraints: false → asosiasi hanya dipakai untuk include/query,
+    // foreign key-nya dikelola manual di DB. sync({ alter: true }) gagal
+    // membuat FK di postgres (syntax error at or near "REFERENCES")
+    Promo.hasMany(models['Product'], {
+      foreignKey: 'promo_id',
+      sourceKey: 'id',
+      as: 'products',
+      constraints: false,
+    });
+  }
 }
 
 Promo.init(
@@ -78,15 +98,6 @@ Promo.init(
       type: DataTypes.UUID,
       defaultValue: DataTypes.UUIDV4,
       primaryKey: true,
-    },
-    code: {
-      type: DataTypes.STRING(100),
-      allowNull: false,
-      defaultValue: '',
-      validate: {
-        notNull: { msg: 'Kode promo wajib diisi' },
-        notEmpty: { msg: 'Kode promo tidak boleh kosong' },
-      },
     },
     name: {
       type: DataTypes.STRING(255),
@@ -102,8 +113,10 @@ Promo.init(
       allowNull: true,
       defaultValue: null,
     },
+    // pakai STRING + isIn, bukan ENUM: menambah nilai ENUM baru lewat
+    // sync({ alter: true }) sering gagal di postgres
     discount_type: {
-      type: DataTypes.ENUM('percentage', 'fixed', 'special_price'),
+      type: DataTypes.STRING(20),
       allowNull: false,
       validate: {
         notNull: { msg: 'Tipe diskon wajib diisi' },
@@ -122,21 +135,14 @@ Promo.init(
         min: { args: [0], msg: 'Nilai diskon tidak boleh negatif' },
       },
     },
-    special_price: {
-      type: DataTypes.DECIMAL(12, 2),
+    // label & keterangan diskon untuk ditampilkan di UI
+    discount_text: {
+      type: DataTypes.STRING(255),
       allowNull: true,
       defaultValue: null,
     },
-    min_purchase: {
-      type: DataTypes.DECIMAL(12, 2),
-      allowNull: false,
-      defaultValue: 0,
-      validate: {
-        min: { args: [0], msg: 'Minimal pembelian tidak boleh negatif' },
-      },
-    },
-    max_discount: {
-      type: DataTypes.DECIMAL(12, 2),
+    discount_description: {
+      type: DataTypes.STRING(255),
       allowNull: true,
       defaultValue: null,
     },
@@ -156,20 +162,30 @@ Promo.init(
         isDate: { args: true, msg: 'Format tanggal selesai tidak valid' },
       },
     },
-    usage_limit: {
-      type: DataTypes.INTEGER,
+    // jam berlaku promo dalam 1 hari. null = berlaku kapan saja sepanjang hari
+    start_time: {
+      type: DataTypes.TIME,
       allowNull: true,
       defaultValue: null,
     },
-    usage_count: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-      defaultValue: 0,
+    end_time: {
+      type: DataTypes.TIME,
+      allowNull: true,
+      defaultValue: null,
     },
-    active: {
-      type: DataTypes.BOOLEAN,
+    // pakai STRING + isIn, bukan ENUM: menambah nilai ENUM baru lewat
+    // sync({ alter: true }) sering gagal di postgres
+    status: {
+      type: DataTypes.STRING(20),
       allowNull: false,
-      defaultValue: true,
+      defaultValue: 'Terjadwal',
+      validate: {
+        notNull: { msg: 'Status wajib diisi' },
+        isIn: {
+          args: [PROMO_STATUSES],
+          msg: `Status harus salah satu dari: ${PROMO_STATUSES.join(', ')}`,
+        },
+      },
     },
     user_id: {
       type: DataTypes.UUID,

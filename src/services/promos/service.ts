@@ -1,98 +1,165 @@
-import { Transaction, WhereOptions, OrderItem } from 'sequelize';
+import { Transaction, WhereOptions, OrderItem, Op } from "sequelize";
 import {
   createPromo,
   findAllPromos,
   findPromoById,
   findPromoByName,
+  countPromosByStatus,
   findActivePromos,
   updatePromo,
   toggleActivePromo,
   deletePromo,
-} from './repository';
-import { generateSerialNumber } from '../naming-series/service';
-import { findUserById } from '../users/repository';
-import { findCompanyByUserId, findCompanyById } from '../company/repository';
-import { OWNER_ROLE } from '../users/model';
-import { NotFoundError, ConflictError, BadRequestError } from '../../utils/app-error';
-import { CreatePromoInput, UpdatePromoInput } from './types';
+} from "./repository";
+import { findUserById } from "../users/repository";
+import { syncProductPromoService } from "../products/service";
+import {
+  findProductsByPromoId,
+  bulkUpdateProductPromo,
+} from "../products/repository";
+import { OWNER_ROLE } from "../users/model";
+import {
+  NotFoundError,
+  ConflictError,
+  BadRequestError,
+} from "../../utils/app-error";
+import type { PromoStatus } from "./model";
+import { CreatePromoInput, UpdatePromoInput } from "./types";
 
 const resolveOwnerId = async (
   requester: { user_id: string; role: string },
   t: Transaction,
-): Promise<{ owner_id: string; company_code: string }> => {
-  if (requester.role === OWNER_ROLE) {
-    const company = await findCompanyByUserId(requester.user_id, t);
-    return {
-      owner_id: requester.user_id,
-      company_code: company?.id ? company.id.slice(0, 4).toUpperCase() : 'COMP',
-    };
-  }
+): Promise<string> => {
+  if (requester.role === OWNER_ROLE) return requester.user_id;
 
   const requesterUser = await findUserById(requester.user_id, t);
-  if (!requesterUser) throw new NotFoundError('User tidak ditemukan');
+  if (!requesterUser) throw new NotFoundError("User tidak ditemukan");
 
-  const owner_id = requesterUser.header_id ?? requesterUser.id;
-  let company_code = 'COMP';
-
-  if (requesterUser.company_id) {
-    const company = await findCompanyById(requesterUser.company_id, t);
-    if (company?.id) company_code = company.id.slice(0, 4).toUpperCase();
-  }
-
-  return { owner_id, company_code };
+  return requesterUser.header_id ?? requesterUser.id;
 };
 
-// validasi spesifik per tipe diskon
-const validateDiscountInput = (input: CreatePromoInput | UpdatePromoInput, isCreate: boolean) => {
-  const discountType = input.discount_type;
+// terima 'HH:mm' maupun 'HH:mm:ss', selalu disimpan sebagai 'HH:mm:ss'.
+// kosong / null → null, artinya promo berlaku kapan saja sepanjang hari
+const normalizeTime = (value: string | null | undefined): string | null => {
+  const time = value?.trim();
+  if (!time) return null;
 
-  if (isCreate && !discountType) {
-    throw new BadRequestError('Validasi gagal', [
-      { field: 'discount_type', message: 'Tipe diskon wajib diisi' },
+  if (!/^\d{2}:\d{2}(:\d{2})?$/.test(time)) {
+    throw new BadRequestError("Validasi gagal", [
+      { field: "time", message: "Format jam harus HH:mm atau HH:mm:ss" },
     ]);
   }
 
-  if (discountType === 'percentage') {
-    if (isCreate && (input.discount_value === undefined || input.discount_value === null)) {
-      throw new BadRequestError('Validasi gagal', [
-        { field: 'discount_value', message: 'Nilai diskon persentase wajib diisi' },
+  return time.length === 5 ? `${time}:00` : time;
+};
+
+// status default dihitung dari periode promo kalau client tidak menentukan sendiri
+const resolveStatusFromPeriod = (
+  start_date: string,
+  end_date: string,
+): PromoStatus => {
+  const today = new Date().toISOString().split("T")[0] as string;
+
+  if (end_date < today) return "Selesai";
+  if (start_date > today) return "Terjadwal";
+  return "Aktif";
+};
+
+// validasi spesifik per tipe diskon
+const validateDiscountInput = (
+  input: CreatePromoInput | UpdatePromoInput,
+  isCreate: boolean,
+) => {
+  const discountType = input.discount_type;
+
+  if (isCreate && !discountType) {
+    throw new BadRequestError("Validasi gagal", [
+      { field: "discount_type", message: "Tipe diskon wajib diisi" },
+    ]);
+  }
+
+  if (discountType === "percentage") {
+    if (
+      isCreate &&
+      (input.discount_value === undefined || input.discount_value === null)
+    ) {
+      throw new BadRequestError("Validasi gagal", [
+        {
+          field: "discount_value",
+          message: "Nilai diskon persentase wajib diisi",
+        },
       ]);
     }
-    if (input.discount_value !== undefined && Number(input.discount_value) > 100) {
-      throw new BadRequestError('Validasi gagal', [
-        { field: 'discount_value', message: 'Diskon persentase tidak boleh lebih dari 100%' },
+    if (
+      input.discount_value !== undefined &&
+      Number(input.discount_value) > 100
+    ) {
+      throw new BadRequestError("Validasi gagal", [
+        {
+          field: "discount_value",
+          message: "Diskon persentase tidak boleh lebih dari 100%",
+        },
       ]);
     }
-    if (input.discount_value !== undefined && Number(input.discount_value) < 0) {
-      throw new BadRequestError('Validasi gagal', [
-        { field: 'discount_value', message: 'Diskon persentase tidak boleh negatif' },
+    if (
+      input.discount_value !== undefined &&
+      Number(input.discount_value) < 0
+    ) {
+      throw new BadRequestError("Validasi gagal", [
+        {
+          field: "discount_value",
+          message: "Diskon persentase tidak boleh negatif",
+        },
       ]);
     }
   }
 
-  if (discountType === 'fixed') {
-    if (isCreate && (input.discount_value === undefined || input.discount_value === null)) {
-      throw new BadRequestError('Validasi gagal', [
-        { field: 'discount_value', message: 'Nilai diskon nominal wajib diisi' },
+  if (discountType === "fixed") {
+    if (
+      isCreate &&
+      (input.discount_value === undefined || input.discount_value === null)
+    ) {
+      throw new BadRequestError("Validasi gagal", [
+        {
+          field: "discount_value",
+          message: "Nilai diskon nominal wajib diisi",
+        },
       ]);
     }
-    if (input.discount_value !== undefined && Number(input.discount_value) < 0) {
-      throw new BadRequestError('Validasi gagal', [
-        { field: 'discount_value', message: 'Diskon nominal tidak boleh negatif' },
+    if (
+      input.discount_value !== undefined &&
+      Number(input.discount_value) < 0
+    ) {
+      throw new BadRequestError("Validasi gagal", [
+        {
+          field: "discount_value",
+          message: "Diskon nominal tidak boleh negatif",
+        },
       ]);
     }
   }
 
-  if (discountType === 'special_price') {
-    const sp = (input as CreatePromoInput).special_price ?? (input as UpdatePromoInput).special_price;
-    if (isCreate && (sp === undefined || sp === null)) {
-      throw new BadRequestError('Validasi gagal', [
-        { field: 'special_price', message: 'Harga spesial wajib diisi untuk tipe harga spesial' },
+  // harga spesial disimpan di discount_value, tidak ada kolom terpisah
+  if (discountType === "special_price") {
+    if (
+      isCreate &&
+      (input.discount_value === undefined || input.discount_value === null)
+    ) {
+      throw new BadRequestError("Validasi gagal", [
+        {
+          field: "discount_value",
+          message: "Harga spesial wajib diisi untuk tipe harga spesial",
+        },
       ]);
     }
-    if (sp !== undefined && sp !== null && Number(sp) < 0) {
-      throw new BadRequestError('Validasi gagal', [
-        { field: 'special_price', message: 'Harga spesial tidak boleh negatif' },
+    if (
+      input.discount_value !== undefined &&
+      Number(input.discount_value) < 0
+    ) {
+      throw new BadRequestError("Validasi gagal", [
+        {
+          field: "discount_value",
+          message: "Harga spesial tidak boleh negatif",
+        },
       ]);
     }
   }
@@ -104,78 +171,87 @@ export const createPromoService = async (
   t: Transaction,
 ) => {
   if (!input.name) {
-    throw new BadRequestError('Validasi gagal', [
-      { field: 'name', message: 'Nama promo wajib diisi' },
+    throw new BadRequestError("Validasi gagal", [
+      { field: "name", message: "Nama promo wajib diisi" },
     ]);
   }
 
   if (!input.start_date) {
-    throw new BadRequestError('Validasi gagal', [
-      { field: 'start_date', message: 'Tanggal mulai wajib diisi' },
+    throw new BadRequestError("Validasi gagal", [
+      { field: "start_date", message: "Tanggal mulai wajib diisi" },
     ]);
   }
 
   if (!input.end_date) {
-    throw new BadRequestError('Validasi gagal', [
-      { field: 'end_date', message: 'Tanggal selesai wajib diisi' },
+    throw new BadRequestError("Validasi gagal", [
+      { field: "end_date", message: "Tanggal selesai wajib diisi" },
     ]);
   }
 
-  if (new Date(input.end_date) < new Date(input.start_date)) {
-    throw new BadRequestError('Validasi gagal', [
-      { field: 'end_date', message: 'Tanggal selesai tidak boleh sebelum tanggal mulai' },
+  // tanggal dibandingkan sebagai string: format 'YYYY-MM-DD' sudah urut
+  // secara leksikografis, jadi tidak perlu Date yang rawan geser timezone
+  const today = new Date().toISOString().split("T")[0] as string;
+
+  if (input.start_date < today) {
+    throw new BadRequestError("Validasi gagal", [
+      {
+        field: "start_date",
+        message: "Tanggal mulai tidak boleh sebelum hari ini",
+      },
+    ]);
+  }
+
+  if (input.end_date < input.start_date) {
+    throw new BadRequestError("Validasi gagal", [
+      {
+        field: "end_date",
+        message: "Tanggal selesai tidak boleh sebelum tanggal mulai",
+      },
+    ]);
+  }
+
+  if (!Array.isArray(input.products) || input.products.length === 0) {
+    throw new BadRequestError("Validasi gagal", [
+      { field: "products", message: "Produk promo wajib diisi minimal 1" },
     ]);
   }
 
   // validasi per tipe diskon
   validateDiscountInput(input, true);
 
-  const { owner_id, company_code } = await resolveOwnerId(requester, t);
+  const owner_id = await resolveOwnerId(requester, t);
 
   // cek nama duplikat
   const duplicateName = await findPromoByName(input.name, owner_id, t);
   if (duplicateName) {
-    throw new ConflictError('Nama promo sudah digunakan', [
-      { field: 'name', message: 'Nama promo sudah digunakan' },
+    throw new ConflictError("Nama promo sudah digunakan", [
+      { field: "name", message: "Nama promo sudah digunakan" },
     ]);
   }
 
-  // generate kode promo otomatis
-  const currentYear = new Date().getFullYear();
-  const code = await generateSerialNumber('PRODUCT', owner_id, 'PROMO', currentYear, company_code, t);
-
   const id = crypto.randomUUID();
+  const start_time = normalizeTime(input.start_time);
+  const end_time = normalizeTime(input.end_time);
 
-  // untuk special_price, discount_value = 0 (tidak relevan)
-  const discountValue = input.discount_type === 'special_price'
-    ? 0
-    : Number(input.discount_value);
-
-  const specialPrice = input.discount_type === 'special_price'
-    ? Number(input.special_price)
-    : null;
-
-  return createPromo(
+  // discount_value menampung ketiga tipe:
+  // percentage → nilai %, fixed → nominal potongan, special_price → harga tetap
+  await createPromo(
     {
       id,
-      code,
       name: input.name,
       description: input.description ?? null,
       discount_type: input.discount_type,
-      discount_value: discountValue,
-      special_price: specialPrice,
-      min_purchase: Number(input.min_purchase ?? 0),
-      max_discount: input.discount_type === 'percentage'
-        && input.max_discount !== undefined
-        && input.max_discount !== null
-        ? Number(input.max_discount)
-        : null,
-      start_date: new Date(input.start_date),
-      end_date: new Date(input.end_date),
-      usage_limit: input.usage_limit !== undefined && input.usage_limit !== null
-        ? Number(input.usage_limit)
-        : null,
-      active: input.active ?? true,
+      discount_value: String(Number(input.discount_value ?? 0)),
+      discount_text: input.discount_text ?? null,
+      discount_description: input.discount_description ?? null,
+      start_date: input.start_date,
+      end_date: input.end_date,
+      start_time,
+      end_time,
+      // status dihitung dari periode kalau client tidak menentukan sendiri
+      status:
+        input.status ??
+        resolveStatusFromPeriod(input.start_date, input.end_date),
       user_id: requester.user_id,
       owner_id,
       created_by: requester.email,
@@ -183,6 +259,12 @@ export const createPromoService = async (
     },
     t,
   );
+
+  // pasang promo ini ke produk-produk yang dipilih
+  await syncProductPromoService(id, input.products, requester, t);
+
+  // dibaca ulang supaya produknya ikut lewat include
+  return findPromoById(id, t);
 };
 
 export const getAllPromosService = async (
@@ -192,11 +274,42 @@ export const getAllPromosService = async (
   page: number,
   limit: number,
   t: Transaction,
+  search?: string,
 ) => {
-  const { owner_id } = await resolveOwnerId(requester, t);
-  const effectiveWhere = { ...where, owner_id };
+  const owner_id = await resolveOwnerId(requester, t);
 
-  return findAllPromos(effectiveWhere, order, page, limit, t);
+  // search dicari ke name (iLike = tidak peduli huruf besar/kecil).
+  // digabung sebagai [Op.and] supaya tidak menimpa kondisi dari `filter`
+  const keyword = search?.trim();
+  const effectiveWhere = {
+    ...where,
+    owner_id,
+    ...(keyword && {
+      [Op.and]: [{ name: { [Op.iLike]: `%${keyword}%` } }],
+    }),
+  };
+
+  // produk ikut lewat include di repository, jadi tidak perlu digabung manual
+  const { rows, count } = await findAllPromos(
+    effectiveWhere,
+    order,
+    page,
+    limit,
+    t,
+  );
+
+  // ringkasan per status dihitung tanpa kondisi `status` dari filter user,
+  // supaya saat user memfilter status=Aktif angka status lain tidak jadi 0
+  const { status: _status, ...whereWithoutStatus } = effectiveWhere as Record<
+    string,
+    unknown
+  >;
+  const summary = await countPromosByStatus(
+    whereWithoutStatus as WhereOptions,
+    t,
+  );
+
+  return { rows, count, ...summary };
 };
 
 export const getPromoByIdService = async (
@@ -204,13 +317,14 @@ export const getPromoByIdService = async (
   requester: { user_id: string; role: string },
   t: Transaction,
 ) => {
-  const { owner_id } = await resolveOwnerId(requester, t);
+  const owner_id = await resolveOwnerId(requester, t);
   const promo = await findPromoById(id, t);
 
   if (!promo || promo.owner_id !== owner_id) {
-    throw new NotFoundError('Promo tidak ditemukan');
+    throw new NotFoundError("Promo tidak ditemukan");
   }
 
+  // produk ikut lewat include di findPromoById
   return promo;
 };
 
@@ -218,7 +332,9 @@ export const getActivePromosService = async (
   requester: { user_id: string; role: string },
   t: Transaction,
 ) => {
-  const { owner_id } = await resolveOwnerId(requester, t);
+  const owner_id = await resolveOwnerId(requester, t);
+
+  // produk ikut lewat include di findActivePromos
   return findActivePromos(owner_id, t);
 };
 
@@ -228,30 +344,69 @@ export const updatePromoService = async (
   requester: { user_id: string; role: string; email: string },
   t: Transaction,
 ) => {
-  const { owner_id } = await resolveOwnerId(requester, t);
+  const owner_id = await resolveOwnerId(requester, t);
   const promo = await findPromoById(id, t);
 
   if (!promo || promo.owner_id !== owner_id) {
-    throw new NotFoundError('Promo tidak ditemukan');
+    throw new NotFoundError("Promo tidak ditemukan");
+  }
+
+  // promo yang masa berlakunya sudah berakhir tidak boleh diubah lagi
+  if (promo.status === "Selesai") {
+    throw new BadRequestError("Promo yang sudah selesai tidak dapat diubah", [
+      {
+        field: "status",
+        message: "Promo dengan status Selesai tidak dapat diubah",
+      },
+    ]);
   }
 
   // cek nama duplikat jika nama diubah
   if (input.name && input.name !== promo.name) {
     const duplicateName = await findPromoByName(input.name, owner_id, t, id);
     if (duplicateName) {
-      throw new ConflictError('Nama promo sudah digunakan', [
-        { field: 'name', message: 'Nama promo sudah digunakan' },
+      throw new ConflictError("Nama promo sudah digunakan", [
+        { field: "name", message: "Nama promo sudah digunakan" },
       ]);
     }
   }
 
   // validasi tanggal
-  const startDate = input.start_date ? new Date(input.start_date) : promo.start_date;
-  const endDate = input.end_date ? new Date(input.end_date) : promo.end_date;
+  // DATEONLY disimpan & dikembalikan sebagai string 'YYYY-MM-DD',
+  // tidak dikonversi ke Date supaya tidak bergeser karena timezone
+  const startDate = input.start_date ?? promo.start_date;
+  const endDate = input.end_date ?? promo.end_date;
 
-  if (new Date(endDate) < new Date(startDate)) {
-    throw new BadRequestError('Validasi gagal', [
-      { field: 'end_date', message: 'Tanggal selesai tidak boleh sebelum tanggal mulai' },
+  // start_date hanya boleh digeser ke hari ini atau ke depan.
+  // dicek hanya kalau start_date memang ikut diubah, supaya promo yang sudah
+  // berjalan (start_date-nya di masa lalu) tetap bisa diupdate field lainnya
+  if (input.start_date) {
+    const today = new Date().toISOString().split("T")[0] as string;
+
+    if (input.start_date < today) {
+      throw new BadRequestError("Validasi gagal", [
+        {
+          field: "start_date",
+          message: "Tanggal mulai tidak boleh sebelum hari ini",
+        },
+      ]);
+    }
+  }
+
+  if (endDate < startDate) {
+    throw new BadRequestError("Validasi gagal", [
+      {
+        field: "end_date",
+        message: "Tanggal selesai tidak boleh sebelum tanggal mulai",
+      },
+    ]);
+  }
+
+  // products wajib minimal 1: promo tanpa produk tidak ada gunanya.
+  // dicek di awal, sebelum promo sempat diupdate
+  if (!Array.isArray(input.products) || input.products.length === 0) {
+    throw new BadRequestError("Validasi gagal", [
+      { field: "products", message: "Produk promo wajib diisi minimal 1" },
     ]);
   }
 
@@ -261,50 +416,50 @@ export const updatePromoService = async (
     validateDiscountInput(input, false);
   }
 
-  // hitung nilai berdasarkan tipe
-  let discountValue = promo.discount_value;
-  let specialPrice = promo.special_price;
-
-  if (effectiveType === 'special_price') {
-    discountValue = 0;
-    specialPrice = input.special_price !== undefined && input.special_price !== null
-      ? Number(input.special_price)
-      : promo.special_price;
-  } else {
-    discountValue = input.discount_value !== undefined
-      ? Number(input.discount_value)
+  // discount_value menampung ketiga tipe, termasuk harga tetap untuk special_price
+  const discountValue =
+    input.discount_value !== undefined
+      ? String(Number(input.discount_value))
       : promo.discount_value;
-    specialPrice = null;
-  }
-
-  const maxDiscount = effectiveType === 'percentage'
-    ? (input.max_discount !== undefined
-      ? (input.max_discount !== null ? Number(input.max_discount) : null)
-      : promo.max_discount)
-    : null;
 
   await updatePromo(
     id,
     {
       name: input.name ?? promo.name,
-      description: input.description !== undefined ? (input.description ?? null) : promo.description,
+      description:
+        input.description !== undefined
+          ? (input.description ?? null)
+          : promo.description,
       discount_type: effectiveType,
       discount_value: discountValue,
-      special_price: specialPrice,
-      min_purchase: input.min_purchase !== undefined ? Number(input.min_purchase) : promo.min_purchase,
-      max_discount: maxDiscount,
+      discount_text:
+        input.discount_text !== undefined
+          ? (input.discount_text ?? null)
+          : promo.discount_text,
+      discount_description:
+        input.discount_description !== undefined
+          ? (input.discount_description ?? null)
+          : promo.discount_description,
       start_date: startDate,
       end_date: endDate,
-      usage_limit: input.usage_limit !== undefined
-        ? (input.usage_limit !== null ? Number(input.usage_limit) : null)
-        : promo.usage_limit,
-      active: input.active !== undefined ? input.active : promo.active,
+      start_time:
+        input.start_time !== undefined
+          ? normalizeTime(input.start_time)
+          : promo.start_time,
+      end_time:
+        input.end_time !== undefined
+          ? normalizeTime(input.end_time)
+          : promo.end_time,
+      status: input.status ?? promo.status,
       updated_by: requester.email,
     },
     t,
   );
 
-  return findPromoById(id, t);
+  // sync penuh: produk di luar daftar ini dilepas dari promo
+  await syncProductPromoService(id, input.products, requester, t);
+
+  return getPromoByIdService(id, requester, t);
 };
 
 // toggle aktif / non-aktif promo
@@ -313,17 +468,22 @@ export const togglePromoActiveService = async (
   requester: { user_id: string; role: string; email: string },
   t: Transaction,
 ) => {
-  const { owner_id } = await resolveOwnerId(requester, t);
+  const owner_id = await resolveOwnerId(requester, t);
   const promo = await findPromoById(id, t);
 
   if (!promo || promo.owner_id !== owner_id) {
-    throw new NotFoundError('Promo tidak ditemukan');
+    throw new NotFoundError("Promo tidak ditemukan");
   }
 
-  const newActive = !promo.active;
-  await toggleActivePromo(id, newActive, requester.email, t);
+  // Nonaktif → kembali mengikuti periode (Aktif/Terjadwal/Selesai),
+  // status lainnya → dimatikan jadi Nonaktif
+  const newStatus: PromoStatus =
+    promo.status === "Nonaktif"
+      ? resolveStatusFromPeriod(promo.start_date, promo.end_date)
+      : "Nonaktif";
 
-  return findPromoById(id, t);
+  await toggleActivePromo(id, newStatus, requester.email, t);
+  return getPromoByIdService(id, requester, t);
 };
 
 export const deletePromoService = async (
@@ -331,11 +491,26 @@ export const deletePromoService = async (
   requester: { user_id: string; role: string; email: string },
   t: Transaction,
 ) => {
-  const { owner_id } = await resolveOwnerId(requester, t);
+  const owner_id = await resolveOwnerId(requester, t);
   const promo = await findPromoById(id, t);
 
   if (!promo || promo.owner_id !== owner_id) {
-    throw new NotFoundError('Promo tidak ditemukan');
+    throw new NotFoundError("Promo tidak ditemukan");
+  }
+
+  // lepas dulu promo dari produk-produknya, kalau tidak promo_id & promo_discount
+  // akan tetap menempel dan menunjuk promo yang sudah dihapus
+  const attachedProducts = await findProductsByPromoId(id, owner_id, t);
+  if (attachedProducts.length > 0) {
+    await bulkUpdateProductPromo(
+      attachedProducts.map((product) => ({
+        id: product.id,
+        promo_id: null,
+        promo_discount: null,
+      })),
+      requester.email,
+      t,
+    );
   }
 
   await deletePromo(id, requester.email, t);

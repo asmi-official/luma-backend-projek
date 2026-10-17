@@ -5,8 +5,6 @@ import {
   updatePaymentGateway,
   deletePaymentGateway,
 } from './repository';
-import { findUserById } from '../users/repository';
-import { findCompanyById } from '../company/repository';
 import { OWNER_ROLE } from '../users/model';
 import { NotFoundError, ConflictError, BadRequestError, ForbiddenError } from '../../utils/app-error';
 import { encrypt, safeDecrypt } from '../../utils/encryption';
@@ -16,26 +14,16 @@ import { CreatePaymentGatewayInput, UpdatePaymentGatewayInput } from './types';
 
 const DEFAULT_PROVIDER: PaymentGatewayProvider = 'MIDTRANS';
 
-// owner_id tidak pernah dikirim client, selalu di-resolve dari requester:
-// - requester owner → owner_id = user_id-nya sendiri
-// - requester bukan owner → owner_id = header_id, atau user_id pemilik company-nya
-const resolveOwnerId = async (
-  requester: { user_id: string; role: string },
-  t: Transaction
-): Promise<string> => {
-  if (requester.role === OWNER_ROLE) return requester.user_id;
-
-  const requesterUser = await findUserById(requester.user_id, t);
-  if (!requesterUser) throw new NotFoundError('User tidak ditemukan');
-
-  if (requesterUser.header_id) return requesterUser.header_id;
-
-  if (requesterUser.company_id) {
-    const company = await findCompanyById(requesterUser.company_id, t);
-    if (company?.user_id) return company.user_id;
+// credential payment gateway hanya boleh diakses oleh role Owner.
+// staff/hrd ditolak walau terikat ke owner, karena isinya kunci rahasia pembayaran.
+// owner_id tidak pernah dikirim client — selalu user_id milik owner itu sendiri,
+// jadi owner tidak bisa menyentuh credential owner lain
+const resolveOwnerId = (requester: { user_id: string; role: string }): string => {
+  if (requester.role !== OWNER_ROLE) {
+    throw new ForbiddenError('Hanya Owner yang dapat mengakses credential payment gateway');
   }
 
-  throw new ForbiddenError('Anda tidak terikat dengan owner manapun');
+  return requester.user_id;
 };
 
 // server_key disembunyikan sebagian saat tidak diminta secara eksplisit,
@@ -73,7 +61,7 @@ export const createPaymentGatewayService = async (
 
   if (errors.length > 0) throw new BadRequestError('Validasi gagal', errors);
 
-  const owner_id = await resolveOwnerId(requester, t);
+  const owner_id = resolveOwnerId(requester);
 
   // 1 owner hanya boleh menghubungkan sekali; selanjutnya wajib lewat update
   const existing = await findPaymentGatewayByOwner(owner_id, DEFAULT_PROVIDER, t);
@@ -112,7 +100,7 @@ export const getPaymentGatewayService = async (
   t: Transaction,
   reveal = false
 ) => {
-  const owner_id = await resolveOwnerId(requester, t);
+  const owner_id = resolveOwnerId(requester);
   const row = await findPaymentGatewayByOwner(owner_id, DEFAULT_PROVIDER, t);
 
   // belum pernah dihubungkan bukan error — UI butuh tahu statusnya
@@ -134,7 +122,7 @@ export const updatePaymentGatewayService = async (
   requester: { user_id: string; role: string; email: string },
   t: Transaction
 ) => {
-  const owner_id = await resolveOwnerId(requester, t);
+  const owner_id = resolveOwnerId(requester);
 
   const existing = await findPaymentGatewayByOwner(owner_id, DEFAULT_PROVIDER, t);
   if (!existing) {
@@ -171,7 +159,7 @@ export const deletePaymentGatewayService = async (
   requester: { user_id: string; role: string; email: string },
   t: Transaction
 ) => {
-  const owner_id = await resolveOwnerId(requester, t);
+  const owner_id = resolveOwnerId(requester);
 
   const existing = await findPaymentGatewayByOwner(owner_id, DEFAULT_PROVIDER, t);
   if (!existing) {

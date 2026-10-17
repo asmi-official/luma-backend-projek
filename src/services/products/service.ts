@@ -5,6 +5,10 @@ import {
   countProductsByActive,
   findProductById,
   findProductByName,
+  findProductsByIds,
+  findProductsByPromoId,
+  findProductsWithOtherPromo,
+  bulkUpdateProductPromo,
   updateProduct,
   deleteProduct,
 } from './repository';
@@ -13,6 +17,7 @@ import { findUserById } from '../users/repository';
 import { findCompanyById, findCompanyByUserId } from '../company/repository';
 import { uploadDocumentService, updateDocumentService, deleteDocumentService } from '../documents/service';
 import { findFlexParamById } from '../flex-params/repository';
+import Promo from '../promos/model';
 import { OWNER_ROLE } from '../users/model';
 import { NotFoundError, ConflictError, BadRequestError } from '../../utils/app-error';
 import { CreateProductInput, UpdateProductInput } from './types';
@@ -250,6 +255,116 @@ export const updateProductService = async (
   );
 
   return findProductById(id, t);
+};
+
+// sync produk yang terikat 1 promo: daftar yang dikirim jadi acuan penuh.
+// produk yang sebelumnya pakai promo ini tapi TIDAK ada di daftar baru
+// akan dikosongkan promo_id & promo_discount-nya (promonya dilepas, datanya tidak dihapus).
+// contoh: sebelumnya [1,2,3,4] lalu dikirim [1,2,3,5] → produk 4 dilepas, produk 5 ditambah
+export const syncProductPromoService = async (
+  promo_id: string,
+  items: { id: string; promo_discount?: number | string | null }[],
+  requester: { user_id: string; role: string; email: string },
+  t: Transaction
+) => {
+  if (!Array.isArray(items)) {
+    throw new BadRequestError('Validasi gagal', [
+      { field: 'products', message: 'products harus berupa array' },
+    ]);
+  }
+
+  const { owner_id } = await resolveOwnerId(requester, t);
+
+  // id duplikat dirapikan dulu, yang terakhir menang
+  const itemMap = new Map(items.map((item) => [item.id, item]));
+  const targetIds = Array.from(itemMap.keys());
+
+  // semua produk yang dikirim wajib ada & milik owner yang sama
+  const foundProducts = await findProductsByIds(targetIds, owner_id, t);
+  const foundIds = new Set(foundProducts.map((p) => p.id));
+
+  const missingIds = targetIds.filter((id) => !foundIds.has(id));
+  if (missingIds.length > 0) {
+    throw new NotFoundError(`Produk tidak ditemukan: ${missingIds.join(', ')}`);
+  }
+
+  // 1 produk tidak boleh terikat 2 promo yang sama-sama berjalan.
+  // promo berstatus Selesai / Nonaktif tidak dihitung bentrok karena tidak jalan,
+  // jadi produknya boleh dipindah ke promo ini
+  const withOtherPromo = await findProductsWithOtherPromo(targetIds, owner_id, promo_id, t);
+
+  if (withOtherPromo.length > 0) {
+    const otherPromoIds = Array.from(
+      new Set(withOtherPromo.map((p) => p.promo_id).filter((id): id is string => !!id))
+    );
+    const otherPromos = await Promo.findAll({
+      where: { id: otherPromoIds },
+      attributes: ['id', 'name', 'status'],
+      transaction: t,
+    });
+
+    const runningPromos = new Map(
+      otherPromos
+        .filter((promo) => promo.status === 'Aktif' || promo.status === 'Terjadwal')
+        .map((promo) => [promo.id, promo])
+    );
+
+    const conflicts = withOtherPromo.filter(
+      (product) => product.promo_id && runningPromos.has(product.promo_id)
+    );
+
+    if (conflicts.length > 0) {
+      throw new ConflictError(
+        'Ada produk yang masih terikat promo lain yang sedang berjalan',
+        conflicts.map((product) => {
+          const promo = runningPromos.get(product.promo_id!)!;
+          return {
+            field: 'products',
+            message: `${product.name} sedang dipakai promo "${promo.name}" (${promo.status})`,
+          };
+        })
+      );
+    }
+  }
+
+  // produk yang sebelumnya pakai promo ini tapi tidak ada di daftar baru → dilepas
+  const currentProducts = await findProductsByPromoId(promo_id, owner_id, t);
+  const releasedIds = currentProducts
+    .map((p) => p.id)
+    .filter((id) => !itemMap.has(id));
+
+  if (releasedIds.length > 0) {
+    await bulkUpdateProductPromo(
+      releasedIds.map((id) => ({ id, promo_id: null, promo_discount: null })),
+      requester.email,
+      t
+    );
+  }
+
+  if (targetIds.length > 0) {
+    await bulkUpdateProductPromo(
+      targetIds.map((id) => {
+        const discount = itemMap.get(id)!.promo_discount;
+        return {
+          id,
+          promo_id,
+          promo_discount:
+            discount === undefined || discount === null || discount === ''
+              ? null
+              : String(Number(discount)),
+        };
+      }),
+      requester.email,
+      t
+    );
+  }
+
+  return {
+    promo_id,
+    attached: targetIds.length,
+    released: releasedIds.length,
+    products: await findProductsByPromoId(promo_id, owner_id, t),
+  };
 };
 
 export const deleteProductService = async (

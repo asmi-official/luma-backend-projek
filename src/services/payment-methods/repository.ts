@@ -28,10 +28,10 @@ export const findPaymentMethodById = async (id: string, t?: Transaction) => {
   return PaymentMethod.findByPk(id, { transaction: t });
 };
 
+// 1 owner hanya boleh punya 1 baris per jenis metode (Tunai / QRIS / Virtual Account)
 export const findDuplicatePaymentMethod = async (
   owner_id: string,
-  key_payment_param_id: string | null,
-  payment_gateway_id: string,
+  key_payment_param_id: string,
   t?: Transaction,
   excludeId?: string
 ) => {
@@ -39,7 +39,6 @@ export const findDuplicatePaymentMethod = async (
     where: {
       owner_id,
       key_payment_param_id,
-      payment_gateway_id,
       ...(excludeId && { id: { [Op.ne]: excludeId } }),
     },
     transaction: t,
