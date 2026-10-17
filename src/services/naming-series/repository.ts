@@ -1,5 +1,8 @@
-import { Transaction } from 'sequelize';
-import NamingSeries, { NamingSeriesCreationAttributes, TypeNamingSeries } from './model';
+import { Transaction } from "sequelize";
+import NamingSeries, {
+  NamingSeriesCreationAttributes,
+  TypeNamingSeries,
+} from "./model";
 
 export const findNamingSeriesById = async (id: string, t?: Transaction) => {
   return NamingSeries.findByPk(id, { transaction: t });
@@ -11,7 +14,7 @@ export const findNamingSeriesByKey = async (
   prefix: string,
   year: number,
   company_code: string,
-  t?: Transaction
+  t?: Transaction,
 ) => {
   return NamingSeries.findOne({
     where: { type_naming_series, owner_id, prefix, year, company_code },
@@ -20,10 +23,17 @@ export const findNamingSeriesByKey = async (
   });
 };
 
-export const createNamingSeries = async (data: NamingSeriesCreationAttributes, t?: Transaction) => {
+export const createNamingSeries = async (
+  data: NamingSeriesCreationAttributes,
+  t?: Transaction,
+) => {
   return NamingSeries.create(data, { transaction: t });
 };
 
 export const incrementSeq = async (id: string, t?: Transaction) => {
-  return NamingSeries.increment('seq', { where: { id }, transaction: t, by: 1 });
+  return NamingSeries.increment("seq", {
+    where: { id },
+    transaction: t,
+    by: 1,
+  });
 };

@@ -1,9 +1,9 @@
-import { DataTypes, Model, Optional } from 'sequelize';
-import sequelize from '../../databases';
+import { DataTypes, Model, Optional } from "sequelize";
+import sequelize from "../../databases";
 
 // modul asal penomoran, contoh: PRODUCT, INVOICE.
 // dipakai supaya tiap modul punya counter sendiri walau prefix/tahun/company-nya sama
-export type TypeNamingSeries = 'PRODUCT' | 'INVOICE';
+export type TypeNamingSeries = "PRODUCT" | "INVOICE";
 
 export interface NamingSeriesAttributes {
   id: string;
@@ -17,10 +17,15 @@ export interface NamingSeriesAttributes {
   updated_at?: Date;
 }
 
-export interface NamingSeriesCreationAttributes
-  extends Optional<NamingSeriesAttributes, 'id' | 'seq'> {}
+export interface NamingSeriesCreationAttributes extends Optional<
+  NamingSeriesAttributes,
+  "id" | "seq"
+> {}
 
-class NamingSeries extends Model<NamingSeriesAttributes, NamingSeriesCreationAttributes> implements NamingSeriesAttributes {
+class NamingSeries
+  extends Model<NamingSeriesAttributes, NamingSeriesCreationAttributes>
+  implements NamingSeriesAttributes
+{
   declare id: string;
   declare type_naming_series: TypeNamingSeries;
   declare owner_id: string;
@@ -43,40 +48,40 @@ NamingSeries.init(
       type: DataTypes.UUID,
       allowNull: false,
       validate: {
-        notNull: { msg: 'Owner ID wajib diisi' },
-        isUUID: { args: 4, msg: 'Owner ID harus berupa UUID valid' },
+        notNull: { msg: "Owner ID wajib diisi" },
+        isUUID: { args: 4, msg: "Owner ID harus berupa UUID valid" },
       },
     },
     type_naming_series: {
       type: DataTypes.STRING(50),
       allowNull: false,
       validate: {
-        notNull: { msg: 'Type naming series wajib diisi' },
-        notEmpty: { msg: 'Type naming series tidak boleh kosong' },
+        notNull: { msg: "Type naming series wajib diisi" },
+        notEmpty: { msg: "Type naming series tidak boleh kosong" },
       },
     },
     prefix: {
       type: DataTypes.STRING(50),
       allowNull: false,
       validate: {
-        notNull: { msg: 'Prefix wajib diisi' },
-        notEmpty: { msg: 'Prefix tidak boleh kosong' },
+        notNull: { msg: "Prefix wajib diisi" },
+        notEmpty: { msg: "Prefix tidak boleh kosong" },
       },
     },
     year: {
       type: DataTypes.INTEGER,
       allowNull: false,
       validate: {
-        notNull: { msg: 'Tahun wajib diisi' },
-        isInt: { msg: 'Tahun harus berupa angka' },
+        notNull: { msg: "Tahun wajib diisi" },
+        isInt: { msg: "Tahun harus berupa angka" },
       },
     },
     company_code: {
       type: DataTypes.STRING(50),
       allowNull: false,
       validate: {
-        notNull: { msg: 'Kode perusahaan wajib diisi' },
-        notEmpty: { msg: 'Kode perusahaan tidak boleh kosong' },
+        notNull: { msg: "Kode perusahaan wajib diisi" },
+        notEmpty: { msg: "Kode perusahaan tidak boleh kosong" },
       },
     },
     seq: {
@@ -84,18 +89,18 @@ NamingSeries.init(
       allowNull: false,
       defaultValue: 1,
       validate: {
-        isInt: { msg: 'Sequence harus berupa angka' },
-        min: { args: [1], msg: 'Sequence minimal 1' },
+        isInt: { msg: "Sequence harus berupa angka" },
+        min: { args: [1], msg: "Sequence minimal 1" },
       },
     },
   },
   {
     sequelize,
-    tableName: 'naming_series',
+    tableName: "naming_series",
     underscored: true,
-    createdAt: 'created_at',
-    updatedAt: 'updated_at',
-  }
+    createdAt: "created_at",
+    updatedAt: "updated_at",
+  },
 );
 
 export default NamingSeries;

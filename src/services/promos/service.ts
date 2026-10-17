@@ -142,7 +142,7 @@ export const createPromoService = async (
 
   // generate kode promo otomatis
   const currentYear = new Date().getFullYear();
-  const code = await generateSerialNumber('PROMO', currentYear, company_code, t);
+  const code = await generateSerialNumber('PRODUCT', owner_id, 'PROMO', currentYear, company_code, t);
 
   const id = crypto.randomUUID();
 
