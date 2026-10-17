@@ -7,6 +7,9 @@
     "dev": "nodemon --watch src --ext ts --exec ts-node src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
+    "migrate": "ts-node src/databases/migrate.ts up",
+    "migrate:down": "ts-node src/databases/migrate.ts down",
+    "migrate:status": "ts-node src/databases/migrate.ts status",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -28,6 +31,7 @@
     "puppeteer": "^25.1.0",
     "qrcode": "^1.5.4",
     "sequelize": "^6.37.8",
+    "umzug": "^3.8.3",
     "winston": "^3.19.0"
   },
   "devDependencies": {

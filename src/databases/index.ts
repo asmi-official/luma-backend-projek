@@ -17,29 +17,65 @@ const sequelize = new Sequelize({
   logging: false,
 });
 
+// model yang punya relasi mendeklarasikannya lewat static associate(),
+// dipanggil loader setelah semua model ter-import
+interface ModelWithAssociate {
+  name: string;
+  associate?: (models: Record<string, unknown>) => void;
+}
+
 // auto scan semua folder di src/services/, jika ada file model.ts maka langsung di-import
 // sehingga tidak perlu daftar model secara manual setiap kali ada model baru
 const importModels = async (): Promise<void> => {
   const servicesDir = path.join(__dirname, '..', 'services');
   const folders = fs.readdirSync(servicesDir);
 
+  const models: Record<string, ModelWithAssociate> = {};
+
   for (const folder of folders) {
     const modelPath = path.join(servicesDir, folder, 'model.ts');
     if (fs.existsSync(modelPath)) {
-      await import(modelPath);
+      const imported = (await import(modelPath)) as { default?: ModelWithAssociate };
+      const model = imported.default;
+
+      if (model?.name) models[model.name] = model;
     }
+  }
+
+  // asosiasi dijalankan belakangan supaya semua model dijamin sudah termuat,
+  // jadi tidak bergantung urutan import dan tidak perlu import silang antar model
+  for (const model of Object.values(models)) {
+    model.associate?.(models);
   }
 };
 
-// autentikasi koneksi, import semua model, lalu sync tabel ke database
-// alter:true = update struktur tabel jika ada perubahan tanpa hapus data
+// sync({ alter: true }) HANYA untuk development.
+// di luar itu perubahan skema wajib lewat migration (npm run migrate), karena:
+// - alter bisa menghapus kolom yang hilang dari model → data hilang permanen
+// - kalau alter gagal, server ikut mati (lihat startServer di bawah)
+// - tidak ada jejak & tidak bisa di-rollback
+// paksa nyalakan di environment lain dengan DB_SYNC_ALTER=true, tapi sadari risikonya
+const shouldSyncAlter = (): boolean => {
+  if (process.env.DB_SYNC_ALTER === 'true') return true;
+  if (process.env.DB_SYNC_ALTER === 'false') return false;
+
+  return (process.env.NODE_ENV ?? 'development') === 'development';
+};
+
+// autentikasi koneksi, import semua model, lalu sync tabel (khusus development)
 export const connectDB = async (): Promise<void> => {
   await sequelize.authenticate();
   logger.info('Database connected successfully');
 
   await importModels();
-  await sequelize.sync({ alter: true });
-  logger.info('Database synced successfully');
+
+  if (shouldSyncAlter()) {
+    await sequelize.sync({ alter: true });
+    logger.info('Database synced successfully (development)');
+    return;
+  }
+
+  logger.info('Skip auto-sync, perubahan skema lewat migration (npm run migrate)');
 };
 
 // jalankan connectDB lalu start express server, jika gagal proses dihentikan

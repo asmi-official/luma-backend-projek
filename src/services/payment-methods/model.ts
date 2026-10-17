@@ -7,7 +7,7 @@ export interface PaymentMethodAttributes {
   owner_id: string;
   active: boolean;
   key_payment_param_id?: string | null;
-  payment_gateway_id: string;
+  payment_gateway_id?: string | null;
   created_at?: Date;
   created_by: string;
   updated_at?: Date;
@@ -19,7 +19,7 @@ export interface PaymentMethodAttributes {
 export interface PaymentMethodCreationAttributes
   extends Optional<
     PaymentMethodAttributes,
-    'id' | 'active' | 'key_payment_param_id' | 'deleted_at' | 'deleted_by'
+    'id' | 'active' | 'key_payment_param_id' | 'payment_gateway_id' | 'deleted_at' | 'deleted_by'
   > {}
 
 class PaymentMethod
@@ -31,7 +31,7 @@ class PaymentMethod
   declare owner_id: string;
   declare active: boolean;
   declare key_payment_param_id: string | null;
-  declare payment_gateway_id: string;
+  declare payment_gateway_id: string | null;
   declare created_at: Date;
   declare created_by: string;
   declare updated_at: Date;
@@ -78,12 +78,13 @@ PaymentMethod.init(
         isUUID: { args: 4, msg: 'Key payment param ID harus berupa UUID valid' },
       },
     },
-    // FK ke payment_gateways: metode pembayaran ini diproses lewat gateway mana
+    // FK ke payment_gateways: metode pembayaran ini diproses lewat gateway mana.
+    // nullable karena TUNAI tidak lewat gateway manapun
     payment_gateway_id: {
       type: DataTypes.UUID,
-      allowNull: false,
+      allowNull: true,
+      defaultValue: null,
       validate: {
-        notNull: { msg: 'Payment gateway ID wajib diisi' },
         isUUID: { args: 4, msg: 'Payment gateway ID harus berupa UUID valid' },
       },
     },
@@ -122,9 +123,10 @@ PaymentMethod.init(
         // nama index dibuat manual & pendek supaya tidak melebihi batas 63 karakter postgres.
         // kalau terpotong, sync({ alter: true }) akan menganggap index belum ada
         // dan mencoba membuatnya lagi setiap restart
-        name: 'payment_methods_owner_key_gateway_unique',
+        // 1 owner hanya boleh punya 1 baris per jenis metode pembayaran
+        name: 'payment_methods_owner_key_unique',
         unique: true,
-        fields: ['owner_id', 'key_payment_param_id', 'payment_gateway_id'],
+        fields: ['owner_id', 'key_payment_param_id'],
         where: { deleted_at: null },
       },
     ],

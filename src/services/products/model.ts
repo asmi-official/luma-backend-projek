@@ -12,6 +12,8 @@ export interface ProductAttributes {
   sell_price: number;
   stock: number;
   description?: string | null;
+  promo_id?: string | null;         // FK ke promos, null = produk tidak sedang berpromo
+  promo_discount?: string | null;   // nilai diskon promo untuk produk ini (DECIMAL → string)
   active: boolean;
   photo_id?: string | null;
   photo_url?: string | null;
@@ -32,6 +34,8 @@ export interface ProductCreationAttributes
     | 'id'
     | 'category_id'
     | 'description'
+    | 'promo_id'
+    | 'promo_discount'
     | 'active'
     | 'photo_id'
     | 'photo_url'
@@ -51,6 +55,8 @@ class Product extends Model<ProductAttributes, ProductCreationAttributes> implem
   declare sell_price: number;
   declare stock: number;
   declare description: string | null;
+  declare promo_id: string | null;
+  declare promo_discount: string | null;
   declare active: boolean;
   declare photo_id: string | null;
   declare photo_url: string | null;
@@ -63,6 +69,19 @@ class Product extends Model<ProductAttributes, ProductCreationAttributes> implem
   declare updated_by: string;
   declare deleted_at: Date | null;
   declare deleted_by: string | null;
+
+  // dipanggil loader di databases/index.ts setelah semua model ter-import.
+  // model diakses lewat parameter `models`, bukan import, supaya tidak circular
+  static associate(models: Record<string, any>): void {
+    // constraints: false → asosiasi hanya dipakai untuk include/query,
+    // foreign key-nya dikelola manual di DB (lihat catatan di promos/model.ts)
+    Product.belongsTo(models['Promo'], {
+      foreignKey: 'promo_id',
+      targetKey: 'id',
+      as: 'promo',
+      constraints: false,
+    });
+  }
 }
 
 Product.init(
@@ -133,6 +152,23 @@ Product.init(
       type: DataTypes.TEXT,
       allowNull: true,
       defaultValue: null,
+    },
+    // relasi ke promos: produk yang sedang terikat promo tertentu
+    promo_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      defaultValue: null,
+      validate: {
+        isUUID: { args: 4, msg: 'Promo ID harus berupa UUID valid' },
+      },
+    },
+    promo_discount: {
+      type: DataTypes.DECIMAL(12, 2),
+      allowNull: true,
+      defaultValue: null,
+      validate: {
+        min: { args: [0], msg: 'Diskon promo tidak boleh negatif' },
+      },
     },
     active: {
       type: DataTypes.BOOLEAN,
