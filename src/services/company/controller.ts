@@ -10,6 +10,7 @@ import { OWNER_ROLE } from '../users/model';
 const COMPANY_FILTERABLE_KEYS = [
   'id',
   'company_name',
+  'company_code',
   'company_cabang',
   'user_id',
   'header_id',

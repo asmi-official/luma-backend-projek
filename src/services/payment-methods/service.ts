@@ -8,6 +8,8 @@ import {
   deletePaymentMethod,
 } from './repository';
 import { findFlexParamById, findFlexParamsByIds } from '../flex-params/repository';
+import { findPaymentGatewayById, findPaymentGatewaysByIds } from '../payment-gateway/repository';
+import type PaymentGateway from '../payment-gateway/model';
 import { findUserById } from '../users/repository';
 import { findCompanyById } from '../company/repository';
 import { OWNER_ROLE } from '../users/model';
@@ -33,44 +35,65 @@ export const resolveOwnerId = async (
   throw new ForbiddenError('Anda tidak terikat dengan owner manapun');
 };
 
+// hanya info aman dari gateway yang ikut di response payment-methods.
+// merchant_id / client_key / server_key TIDAK pernah disertakan di sini —
+// credential hanya boleh diambil lewat endpoint payment-gateway
+const toGatewaySummary = (gateway: PaymentGateway) => ({
+  id: gateway.id,
+  provider: gateway.provider,
+  is_connected: gateway.is_connected,
+});
+
+// payment_gateway_id harus menunjuk ke credential milik owner yang sama.
+// kalau milik owner lain diperlakukan seperti tidak ada, supaya id orang lain tidak bisa ditebak
+const assertGatewayBelongsToOwner = async (
+  payment_gateway_id: string,
+  owner_id: string,
+  t: Transaction
+): Promise<void> => {
+  const gateway = await findPaymentGatewayById(payment_gateway_id, t);
+
+  if (!gateway || gateway.owner_id !== owner_id) {
+    throw new NotFoundError('Payment gateway tidak ditemukan');
+  }
+};
+
 export const createPaymentMethodService = async (
   input: CreatePaymentMethodInput,
   requester: { user_id: string; role: string; email: string },
   t: Transaction
 ) => {
-  if (!input.key_payment_param_id) {
+  if (!input.payment_gateway_id) {
     throw new BadRequestError('Validasi gagal', [
-      { field: 'key_payment_param_id', message: 'key_payment_param_id wajib diisi' },
-    ]);
-  }
-
-  if (!input.method_payment_param_id) {
-    throw new BadRequestError('Validasi gagal', [
-      { field: 'method_payment_param_id', message: 'method_payment_param_id wajib diisi' },
+      { field: 'payment_gateway_id', message: 'payment_gateway_id wajib diisi' },
     ]);
   }
 
   const owner_id = await resolveOwnerId(requester, t);
 
-  const keyParam = await findFlexParamById(input.key_payment_param_id, t);
-  if (!keyParam) {
-    throw new NotFoundError('Key payment param tidak ditemukan');
+  // key_payment_param_id opsional: '' / undefined dinormalkan jadi null,
+  // dan hanya divalidasi ke flex_params kalau memang diisi
+  const key_payment_param_id = input.key_payment_param_id || null;
+
+  if (key_payment_param_id) {
+    const keyParam = await findFlexParamById(key_payment_param_id, t);
+    if (!keyParam) {
+      throw new NotFoundError('Key payment param tidak ditemukan');
+    }
   }
 
-  const methodParam = await findFlexParamById(input.method_payment_param_id, t);
-  if (!methodParam) {
-    throw new NotFoundError('Method payment param tidak ditemukan');
-  }
+  // gateway wajib milik owner yang sama, supaya tidak bisa menunjuk credential owner lain
+  await assertGatewayBelongsToOwner(input.payment_gateway_id, owner_id, t);
 
   const duplicate = await findDuplicatePaymentMethod(
     owner_id,
-    input.key_payment_param_id,
-    input.method_payment_param_id,
+    key_payment_param_id,
+    input.payment_gateway_id,
     t
   );
   if (duplicate) {
     throw new ConflictError('Metode pembayaran ini sudah terdaftar untuk owner Anda', [
-      { field: 'method_payment_param_id', message: 'Metode pembayaran ini sudah terdaftar' },
+      { field: 'payment_gateway_id', message: 'Metode pembayaran ini sudah terdaftar' },
     ]);
   }
 
@@ -78,8 +101,8 @@ export const createPaymentMethodService = async (
     {
       user_id: requester.user_id,
       owner_id,
-      key_payment_param_id: input.key_payment_param_id,
-      method_payment_param_id: input.method_payment_param_id,
+      key_payment_param_id,
+      payment_gateway_id: input.payment_gateway_id,
       active: input.active ?? false,
       created_by: requester.email,
       updated_by: requester.email,
@@ -101,17 +124,22 @@ export const getAllPaymentMethodsService = async (
 
   const { rows, count } = await findAllPaymentMethods(effectiveWhere, order, page, limit, t);
 
-  const keyParamIds = rows.map((r) => r.key_payment_param_id);
-  const methodParamIds = rows.map((r) => r.method_payment_param_id);
-  const allParamIds = Array.from(new Set([...keyParamIds, ...methodParamIds]));
+  // key_payment_param_id boleh null, jadi id null disaring dulu sebelum di-query
+  const keyParamIds = Array.from(
+    new Set(rows.map((r) => r.key_payment_param_id).filter((id): id is string => !!id))
+  );
 
-  const flexParams = await findFlexParamsByIds(allParamIds, t);
+  const flexParams = await findFlexParamsByIds(keyParamIds, t);
   const paramMap = new Map(flexParams.map((p) => [p.id, p]));
+
+  const gatewayIds = Array.from(new Set(rows.map((r) => r.payment_gateway_id)));
+  const gateways = await findPaymentGatewaysByIds(gatewayIds, t);
+  const gatewayMap = new Map(gateways.map((g) => [g.id, toGatewaySummary(g)]));
 
   const data = rows.map((row) => ({
     ...row.toJSON(),
-    key_payment: paramMap.get(row.key_payment_param_id) ?? null,
-    method_payment: paramMap.get(row.method_payment_param_id) ?? null,
+    key_payment: row.key_payment_param_id ? paramMap.get(row.key_payment_param_id) ?? null : null,
+    payment_gateway: gatewayMap.get(row.payment_gateway_id) ?? null,
   }));
 
   return { rows: data, count };
@@ -129,13 +157,15 @@ export const getPaymentMethodByIdService = async (
     throw new NotFoundError('Metode pembayaran tidak ditemukan');
   }
 
-  const keyParam = await findFlexParamById(result.key_payment_param_id, t);
-  const methodParam = await findFlexParamById(result.method_payment_param_id, t);
+  const keyParam = result.key_payment_param_id
+    ? await findFlexParamById(result.key_payment_param_id, t)
+    : null;
+  const gateway = await findPaymentGatewayById(result.payment_gateway_id, t);
 
   return {
     ...result.toJSON(),
     key_payment: keyParam ?? null,
-    method_payment: methodParam ?? null,
+    payment_gateway: gateway ? toGatewaySummary(gateway) : null,
   };
 };
 
@@ -153,29 +183,28 @@ export const updatePaymentMethodService = async (
   }
 
   const effectiveKeyParamId = input.key_payment_param_id ?? paymentMethod.key_payment_param_id;
-  const effectiveMethodParamId = input.method_payment_param_id ?? paymentMethod.method_payment_param_id;
+  const effectiveGatewayId = input.payment_gateway_id ?? paymentMethod.payment_gateway_id;
 
   if (input.key_payment_param_id) {
     const keyParam = await findFlexParamById(input.key_payment_param_id, t);
     if (!keyParam) throw new NotFoundError('Key payment param tidak ditemukan');
   }
 
-  if (input.method_payment_param_id) {
-    const methodParam = await findFlexParamById(input.method_payment_param_id, t);
-    if (!methodParam) throw new NotFoundError('Method payment param tidak ditemukan');
+  if (input.payment_gateway_id) {
+    await assertGatewayBelongsToOwner(input.payment_gateway_id, owner_id, t);
   }
 
-  if (input.key_payment_param_id || input.method_payment_param_id) {
+  if (input.key_payment_param_id || input.payment_gateway_id) {
     const duplicate = await findDuplicatePaymentMethod(
       owner_id,
       effectiveKeyParamId,
-      effectiveMethodParamId,
+      effectiveGatewayId,
       t,
       id
     );
     if (duplicate) {
       throw new ConflictError('Metode pembayaran ini sudah terdaftar untuk owner Anda', [
-        { field: 'method_payment_param_id', message: 'Metode pembayaran ini sudah terdaftar' },
+        { field: 'payment_gateway_id', message: 'Metode pembayaran ini sudah terdaftar' },
       ]);
     }
   }
@@ -186,7 +215,7 @@ export const updatePaymentMethodService = async (
     id,
     {
       key_payment_param_id: effectiveKeyParamId,
-      method_payment_param_id: effectiveMethodParamId,
+      payment_gateway_id: effectiveGatewayId,
       ...(input.active !== undefined && { active: input.active }),
       updated_by: requester.email,
     },

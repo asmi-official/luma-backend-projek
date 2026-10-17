@@ -1,18 +1,20 @@
 import { Transaction } from 'sequelize';
-import NamingSeries, { NamingSeriesCreationAttributes } from './model';
+import NamingSeries, { NamingSeriesCreationAttributes, TypeNamingSeries } from './model';
 
 export const findNamingSeriesById = async (id: string, t?: Transaction) => {
   return NamingSeries.findByPk(id, { transaction: t });
 };
 
 export const findNamingSeriesByKey = async (
+  type_naming_series: TypeNamingSeries,
+  owner_id: string,
   prefix: string,
   year: number,
   company_code: string,
   t?: Transaction
 ) => {
   return NamingSeries.findOne({
-    where: { prefix, year, company_code },
+    where: { type_naming_series, owner_id, prefix, year, company_code },
     transaction: t,
     lock: t ? Transaction.LOCK.UPDATE : undefined,
   });

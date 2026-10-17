@@ -17,7 +17,7 @@ const PAYMENT_METHOD_FILTERABLE_KEYS = [
   'owner_id',
   'active',
   'key_payment_param_id',
-  'method_payment_param_id',
+  'payment_gateway_id',
   'created_at',
   'created_by',
   'updated_at',

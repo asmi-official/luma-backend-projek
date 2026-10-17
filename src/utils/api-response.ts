@@ -58,16 +58,20 @@ export const parsePagination = (query: Record<string, unknown>): PaginationParam
   return { page, limit };
 };
 
+// extra: field tambahan opsional yang ditaruh tepat setelah message,
+// dipakai misalnya untuk ringkasan jumlah data aktif/tidak aktif
 export const sendPaginated = <T>(
   res: Response,
   data: T[],
   total: number,
   params: PaginationParams,
-  message = 'Berhasil mengambil data'
+  message = 'Berhasil mengambil data',
+  extra?: Record<string, unknown>
 ) => {
   return res.status(200).json({
     status: 'success',
     message,
+    ...extra,
     data,
     meta: {
       page: params.page,

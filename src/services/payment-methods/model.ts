@@ -6,8 +6,8 @@ export interface PaymentMethodAttributes {
   user_id: string;
   owner_id: string;
   active: boolean;
-  key_payment_param_id: string;
-  method_payment_param_id: string;
+  key_payment_param_id?: string | null;
+  payment_gateway_id: string;
   created_at?: Date;
   created_by: string;
   updated_at?: Date;
@@ -17,7 +17,10 @@ export interface PaymentMethodAttributes {
 }
 
 export interface PaymentMethodCreationAttributes
-  extends Optional<PaymentMethodAttributes, 'id' | 'active' | 'deleted_at' | 'deleted_by'> {}
+  extends Optional<
+    PaymentMethodAttributes,
+    'id' | 'active' | 'key_payment_param_id' | 'deleted_at' | 'deleted_by'
+  > {}
 
 class PaymentMethod
   extends Model<PaymentMethodAttributes, PaymentMethodCreationAttributes>
@@ -27,8 +30,8 @@ class PaymentMethod
   declare user_id: string;
   declare owner_id: string;
   declare active: boolean;
-  declare key_payment_param_id: string;
-  declare method_payment_param_id: string;
+  declare key_payment_param_id: string | null;
+  declare payment_gateway_id: string;
   declare created_at: Date;
   declare created_by: string;
   declare updated_at: Date;
@@ -69,18 +72,19 @@ PaymentMethod.init(
     },
     key_payment_param_id: {
       type: DataTypes.UUID,
-      allowNull: false,
+      allowNull: true,
+      defaultValue: null,
       validate: {
-        notNull: { msg: 'Key payment param ID wajib diisi' },
         isUUID: { args: 4, msg: 'Key payment param ID harus berupa UUID valid' },
       },
     },
-    method_payment_param_id: {
+    // FK ke payment_gateways: metode pembayaran ini diproses lewat gateway mana
+    payment_gateway_id: {
       type: DataTypes.UUID,
       allowNull: false,
       validate: {
-        notNull: { msg: 'Method payment param ID wajib diisi' },
-        isUUID: { args: 4, msg: 'Method payment param ID harus berupa UUID valid' },
+        notNull: { msg: 'Payment gateway ID wajib diisi' },
+        isUUID: { args: 4, msg: 'Payment gateway ID harus berupa UUID valid' },
       },
     },
     created_by: {
@@ -118,9 +122,9 @@ PaymentMethod.init(
         // nama index dibuat manual & pendek supaya tidak melebihi batas 63 karakter postgres.
         // kalau terpotong, sync({ alter: true }) akan menganggap index belum ada
         // dan mencoba membuatnya lagi setiap restart
-        name: 'payment_methods_owner_key_method_unique',
+        name: 'payment_methods_owner_key_gateway_unique',
         unique: true,
-        fields: ['owner_id', 'key_payment_param_id', 'method_payment_param_id'],
+        fields: ['owner_id', 'key_payment_param_id', 'payment_gateway_id'],
         where: { deleted_at: null },
       },
     ],

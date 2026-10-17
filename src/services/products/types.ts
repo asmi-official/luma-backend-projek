@@ -1,6 +1,7 @@
 export interface CreateProductInput {
   name: string;
   category: string;
+  category_id: string;
   unit: string;
   cost_price: number;
   sell_price: number;
@@ -12,6 +13,7 @@ export interface CreateProductInput {
 export interface UpdateProductInput {
   name?: string;
   category?: string;
+  category_id?: string | null;
   unit?: string;
   cost_price?: number;
   sell_price?: number;
