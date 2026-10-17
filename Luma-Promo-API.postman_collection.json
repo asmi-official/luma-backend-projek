@@ -1,0 +1,1094 @@
+{
+  "info": {
+    "name": "Luma - Promo & Diskon API",
+    "description": "Collection lengkap untuk testing modul Promo/Diskon.\n\n**Cara pakai:**\n1. Jalankan request `Login` terlebih dahulu untuk mendapat token\n2. Token otomatis tersimpan di variable `access_token`\n3. Semua request promo sudah pakai Bearer token otomatis\n\n**3 Tipe Promo:**\n- `percentage` → Diskon Persentase\n- `fixed` → Diskon Nominal\n- `special_price` → Harga Spesial",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:4000/api"
+    },
+    {
+      "key": "access_token",
+      "value": ""
+    },
+    {
+      "key": "promo_id",
+      "value": ""
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "description": "Autentikasi - jalankan Login dulu sebelum test promo",
+      "item": [
+        {
+          "name": "Register (Owner)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"full_name\": \"Test Owner\",\n  \"username\": \"testowner\",\n  \"email\": \"owner@test.com\",\n  \"phone\": \"08123456789\",\n  \"password\": \"password123\",\n  \"role\": \"Owner\",\n  \"company_name\": \"PT Luma Test\",\n  \"agree\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/users/register",
+              "host": ["{{base_url}}"],
+              "path": ["users", "register"]
+            },
+            "description": "Register user Owner baru. Jalankan sekali saja."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201 || pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "    if (json.data && json.data.access_token) {",
+                  "        pm.collectionVariables.set('access_token', json.data.access_token);",
+                  "        console.log('access_token saved from register');",
+                  "    }",
+                  "}",
+                  "",
+                  "pm.test('Register berhasil', function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"owner@test.com\",\n  \"password\": \"password123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/users/login",
+              "host": ["{{base_url}}"],
+              "path": ["users", "login"]
+            },
+            "description": "Login untuk mendapat access_token. Token otomatis tersimpan di collection variable."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('Login berhasil', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(json.data).to.have.property('access_token');",
+                  "});",
+                  "",
+                  "if (json.data && json.data.access_token) {",
+                  "    pm.collectionVariables.set('access_token', json.data.access_token);",
+                  "    console.log('access_token saved');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Promo - Create",
+      "description": "Buat promo baru (3 tipe)",
+      "item": [
+        {
+          "name": "Tambah Promo - Diskon Persentase",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Diskon Akhir Tahun 10%\",\n  \"description\": \"Diskon 10% untuk semua produk di akhir tahun\",\n  \"discount_type\": \"percentage\",\n  \"discount_value\": 10,\n  \"max_discount\": 50000,\n  \"min_purchase\": 100000,\n  \"start_date\": \"2026-10-01\",\n  \"end_date\": \"2026-12-31\",\n  \"usage_limit\": 100,\n  \"active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/promos",
+              "host": ["{{base_url}}"],
+              "path": ["promos"]
+            },
+            "description": "Buat promo tipe **Diskon Persentase**.\n\n- `discount_value`: nilai persen (0-100)\n- `max_discount`: batas maksimal potongan (opsional)\n- `min_purchase`: minimal total belanja"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('Promo persentase berhasil dibuat', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "    pm.expect(json.status).to.eql('success');",
+                  "    pm.expect(json.data.discount_type).to.eql('percentage');",
+                  "    pm.expect(Number(json.data.discount_value)).to.eql(10);",
+                  "});",
+                  "",
+                  "if (json.data && json.data.id) {",
+                  "    pm.collectionVariables.set('promo_id', json.data.id);",
+                  "    console.log('promo_id saved:', json.data.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tambah Promo - Diskon Nominal",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Potongan Rp 50.000\",\n  \"description\": \"Potongan langsung Rp 50.000 untuk pembelian minimal Rp 200.000\",\n  \"discount_type\": \"fixed\",\n  \"discount_value\": 50000,\n  \"min_purchase\": 200000,\n  \"start_date\": \"2026-10-01\",\n  \"end_date\": \"2026-11-30\",\n  \"usage_limit\": 50,\n  \"active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/promos",
+              "host": ["{{base_url}}"],
+              "path": ["promos"]
+            },
+            "description": "Buat promo tipe **Diskon Nominal**.\n\n- `discount_value`: nominal potongan harga tetap (Rp)\n- `max_discount`: tidak perlu (sudah fixed)\n- `min_purchase`: minimal total belanja"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('Promo nominal berhasil dibuat', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "    pm.expect(json.status).to.eql('success');",
+                  "    pm.expect(json.data.discount_type).to.eql('fixed');",
+                  "    pm.expect(Number(json.data.discount_value)).to.eql(50000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tambah Promo - Harga Spesial",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Harga Spesial Weekend\",\n  \"description\": \"Harga spesial Rp 99.000 untuk produk tertentu setiap weekend\",\n  \"discount_type\": \"special_price\",\n  \"discount_value\": 0,\n  \"special_price\": 99000,\n  \"min_purchase\": 0,\n  \"start_date\": \"2026-10-01\",\n  \"end_date\": \"2026-12-31\",\n  \"usage_limit\": null,\n  \"active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/promos",
+              "host": ["{{base_url}}"],
+              "path": ["promos"]
+            },
+            "description": "Buat promo tipe **Harga Spesial**.\n\n- `special_price`: harga tetap khusus yang langsung ditetapkan\n- `discount_value`: diset 0 (tidak relevan)\n- `usage_limit`: null = tidak terbatas"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('Promo harga spesial berhasil dibuat', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "    pm.expect(json.status).to.eql('success');",
+                  "    pm.expect(json.data.discount_type).to.eql('special_price');",
+                  "    pm.expect(Number(json.data.special_price)).to.eql(99000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Promo - Read",
+      "description": "Ambil data promo (list, detail, aktif)",
+      "item": [
+        {
+          "name": "List Semua Promo",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/promos?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["promos"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            },
+            "description": "List semua promo dengan pagination.\n\nQuery params opsional:\n- `page` (default 1)\n- `limit` (default 10, max 100)\n- `sort` (nama kolom, misal `created_at`)\n- `order` (`asc` / `desc`)\n- `filter` (JSON array, misal `[{\"key\":\"discount_type\",\"operator\":\"equal\",\"value\":\"percentage\"}]`)"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('List promo berhasil', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(json.status).to.eql('success');",
+                  "    pm.expect(json.data).to.be.an('array');",
+                  "    pm.expect(json.meta).to.have.property('total');",
+                  "});",
+                  "",
+                  "// simpan id promo pertama untuk test selanjutnya",
+                  "if (json.data && json.data.length > 0) {",
+                  "    pm.collectionVariables.set('promo_id', json.data[0].id);",
+                  "    console.log('promo_id saved:', json.data[0].id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Promo - Filter by Tipe Persentase",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/promos?page=1&limit=10&filter=[{\"key\":\"discount_type\",\"operator\":\"equal\",\"value\":\"percentage\"}]",
+              "host": ["{{base_url}}"],
+              "path": ["promos"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" },
+                { "key": "filter", "value": "[{\"key\":\"discount_type\",\"operator\":\"equal\",\"value\":\"percentage\"}]" }
+              ]
+            },
+            "description": "Filter promo hanya tipe Diskon Persentase"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('Filter promo persentase', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    json.data.forEach(p => {",
+                  "        pm.expect(p.discount_type).to.eql('percentage');",
+                  "    });",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Promo - Filter by Tipe Nominal",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/promos?page=1&limit=10&filter=[{\"key\":\"discount_type\",\"operator\":\"equal\",\"value\":\"fixed\"}]",
+              "host": ["{{base_url}}"],
+              "path": ["promos"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" },
+                { "key": "filter", "value": "[{\"key\":\"discount_type\",\"operator\":\"equal\",\"value\":\"fixed\"}]" }
+              ]
+            },
+            "description": "Filter promo hanya tipe Diskon Nominal"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('Filter promo nominal', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    json.data.forEach(p => {",
+                  "        pm.expect(p.discount_type).to.eql('fixed');",
+                  "    });",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Promo - Filter by Tipe Harga Spesial",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/promos?page=1&limit=10&filter=[{\"key\":\"discount_type\",\"operator\":\"equal\",\"value\":\"special_price\"}]",
+              "host": ["{{base_url}}"],
+              "path": ["promos"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" },
+                { "key": "filter", "value": "[{\"key\":\"discount_type\",\"operator\":\"equal\",\"value\":\"special_price\"}]" }
+              ]
+            },
+            "description": "Filter promo hanya tipe Harga Spesial"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('Filter promo harga spesial', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    json.data.forEach(p => {",
+                  "        pm.expect(p.discount_type).to.eql('special_price');",
+                  "    });",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Promo - Filter by Status Aktif",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/promos?page=1&limit=10&filter=[{\"key\":\"active\",\"operator\":\"equal\",\"value\":true}]",
+              "host": ["{{base_url}}"],
+              "path": ["promos"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" },
+                { "key": "filter", "value": "[{\"key\":\"active\",\"operator\":\"equal\",\"value\":true}]" }
+              ]
+            },
+            "description": "Filter promo yang statusnya aktif saja"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('Filter promo aktif', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    json.data.forEach(p => {",
+                  "        pm.expect(p.active).to.eql(true);",
+                  "    });",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Promo - Sort by Nama ASC",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/promos?page=1&limit=10&sort=name&order=asc",
+              "host": ["{{base_url}}"],
+              "path": ["promos"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" },
+                { "key": "sort", "value": "name" },
+                { "key": "order", "value": "asc" }
+              ]
+            },
+            "description": "List promo diurutkan berdasarkan nama A-Z"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Sort promo by name ASC', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Promo - Search by Nama (like)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/promos?page=1&limit=10&filter=[{\"key\":\"name\",\"operator\":\"like\",\"value\":\"diskon\"}]",
+              "host": ["{{base_url}}"],
+              "path": ["promos"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" },
+                { "key": "filter", "value": "[{\"key\":\"name\",\"operator\":\"like\",\"value\":\"diskon\"}]" }
+              ]
+            },
+            "description": "Cari promo yang namanya mengandung kata 'diskon'"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Search promo by nama', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Promo Aktif (dalam periode)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/promos/active",
+              "host": ["{{base_url}}"],
+              "path": ["promos", "active"]
+            },
+            "description": "Ambil semua promo yang:\n- `active = true`\n- `start_date <= hari ini`\n- `end_date >= hari ini`"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('List promo aktif berhasil', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(json.status).to.eql('success');",
+                  "    pm.expect(json.data).to.be.an('array');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detail Promo",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/promos/{{promo_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["promos", "{{promo_id}}"]
+            },
+            "description": "Ambil detail satu promo berdasarkan ID.\n\nPastikan `promo_id` sudah terisi (otomatis dari request sebelumnya)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('Detail promo berhasil', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(json.status).to.eql('success');",
+                  "    pm.expect(json.data).to.have.property('id');",
+                  "    pm.expect(json.data).to.have.property('code');",
+                  "    pm.expect(json.data).to.have.property('name');",
+                  "    pm.expect(json.data).to.have.property('discount_type');",
+                  "    pm.expect(json.data).to.have.property('discount_value');",
+                  "    pm.expect(json.data).to.have.property('start_date');",
+                  "    pm.expect(json.data).to.have.property('end_date');",
+                  "    pm.expect(json.data).to.have.property('active');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Promo - Update",
+      "description": "Edit promo",
+      "item": [
+        {
+          "name": "Edit Promo - Ubah Nama & Nilai",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Diskon Akhir Tahun 15%\",\n  \"discount_value\": 15,\n  \"max_discount\": 75000,\n  \"description\": \"Diskon 15% (updated) untuk semua produk\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/promos/{{promo_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["promos", "{{promo_id}}"]
+            },
+            "description": "Edit promo: ubah nama, nilai diskon, dan deskripsi."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('Edit promo berhasil', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(json.status).to.eql('success');",
+                  "    pm.expect(json.data.name).to.eql('Diskon Akhir Tahun 15%');",
+                  "    pm.expect(Number(json.data.discount_value)).to.eql(15);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Edit Promo - Ubah Periode",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"start_date\": \"2026-11-01\",\n  \"end_date\": \"2027-01-31\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/promos/{{promo_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["promos", "{{promo_id}}"]
+            },
+            "description": "Edit promo: ubah periode berlaku."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('Edit periode promo berhasil', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(json.status).to.eql('success');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Edit Promo - Ganti Tipe ke Harga Spesial",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"discount_type\": \"special_price\",\n  \"special_price\": 150000,\n  \"description\": \"Diubah jadi harga spesial Rp 150.000\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/promos/{{promo_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["promos", "{{promo_id}}"]
+            },
+            "description": "Edit promo: ganti tipe dari percentage/fixed ke harga spesial."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('Ganti tipe ke special_price berhasil', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(json.data.discount_type).to.eql('special_price');",
+                  "    pm.expect(Number(json.data.special_price)).to.eql(150000);",
+                  "    pm.expect(Number(json.data.discount_value)).to.eql(0);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Promo - Toggle Active",
+      "description": "Non-aktifkan / Aktifkan promo",
+      "item": [
+        {
+          "name": "Non-aktifkan Promo",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/promos/{{promo_id}}/toggle-active",
+              "host": ["{{base_url}}"],
+              "path": ["promos", "{{promo_id}}", "toggle-active"]
+            },
+            "description": "Toggle status aktif promo.\n\nJika sebelumnya `active = true` → jadi `false` (non-aktif).\nJika sebelumnya `active = false` → jadi `true` (aktif kembali)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('Toggle active promo berhasil', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(json.status).to.eql('success');",
+                  "    pm.expect(json.data).to.have.property('active');",
+                  "    // active harus berubah dari sebelumnya",
+                  "    console.log('Promo active status:', json.data.active);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Aktifkan Kembali Promo",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/promos/{{promo_id}}/toggle-active",
+              "host": ["{{base_url}}"],
+              "path": ["promos", "{{promo_id}}", "toggle-active"]
+            },
+            "description": "Panggil toggle lagi → promo aktif kembali."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('Toggle kembali berhasil', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(json.data.active).to.eql(true);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Promo - Delete",
+      "description": "Hapus promo (soft delete)",
+      "item": [
+        {
+          "name": "Hapus Promo",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/promos/{{promo_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["promos", "{{promo_id}}"]
+            },
+            "description": "Hapus promo secara soft delete.\n\nData tidak benar-benar hilang dari database, hanya diberi `deleted_at` timestamp."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "",
+                  "pm.test('Hapus promo berhasil', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(json.status).to.eql('success');",
+                  "    pm.expect(json.message).to.include('dihapus');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Verify - Detail Promo Setelah Dihapus (404)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/promos/{{promo_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["promos", "{{promo_id}}"]
+            },
+            "description": "Verifikasi promo sudah tidak bisa diakses setelah dihapus."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Promo sudah tidak ditemukan (404)', function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Promo - Validasi Error",
+      "description": "Test validasi & error handling",
+      "item": [
+        {
+          "name": "Error - Tanpa Token (401)",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/promos",
+              "host": ["{{base_url}}"],
+              "path": ["promos"]
+            },
+            "description": "Request tanpa Bearer token → harus 401."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Tanpa token harus 401', function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Error - Nama Kosong (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"\",\n  \"discount_type\": \"percentage\",\n  \"discount_value\": 10,\n  \"start_date\": \"2026-10-01\",\n  \"end_date\": \"2026-12-31\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/promos",
+              "host": ["{{base_url}}"],
+              "path": ["promos"]
+            },
+            "description": "Nama promo kosong → harus error validasi."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Nama kosong harus error', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Error - Persentase > 100 (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Promo Invalid\",\n  \"discount_type\": \"percentage\",\n  \"discount_value\": 150,\n  \"start_date\": \"2026-10-01\",\n  \"end_date\": \"2026-12-31\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/promos",
+              "host": ["{{base_url}}"],
+              "path": ["promos"]
+            },
+            "description": "Diskon persentase 150% → harus error."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Persentase > 100 harus error', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Error - End Date < Start Date (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Promo Tanggal Salah\",\n  \"discount_type\": \"fixed\",\n  \"discount_value\": 10000,\n  \"start_date\": \"2026-12-31\",\n  \"end_date\": \"2026-10-01\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/promos",
+              "host": ["{{base_url}}"],
+              "path": ["promos"]
+            },
+            "description": "Tanggal selesai sebelum tanggal mulai → harus error."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('End date < start date harus error', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Error - Harga Spesial Tanpa special_price (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Promo Spesial Tanpa Harga\",\n  \"discount_type\": \"special_price\",\n  \"discount_value\": 0,\n  \"start_date\": \"2026-10-01\",\n  \"end_date\": \"2026-12-31\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/promos",
+              "host": ["{{base_url}}"],
+              "path": ["promos"]
+            },
+            "description": "Tipe harga spesial tapi tidak mengisi field `special_price` → harus error."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Special price kosong harus error', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Error - Promo Tidak Ditemukan (404)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/promos/00000000-0000-0000-0000-000000000000",
+              "host": ["{{base_url}}"],
+              "path": ["promos", "00000000-0000-0000-0000-000000000000"]
+            },
+            "description": "Akses promo dengan ID yang tidak ada → harus 404."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Promo tidak ditemukan harus 404', function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Error - Nama Duplikat (409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Potongan Rp 50.000\",\n  \"discount_type\": \"fixed\",\n  \"discount_value\": 50000,\n  \"start_date\": \"2026-10-01\",\n  \"end_date\": \"2026-12-31\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/promos",
+              "host": ["{{base_url}}"],
+              "path": ["promos"]
+            },
+            "description": "Buat promo dengan nama yang sudah ada → harus 409 Conflict.\n\n(Pastikan promo 'Potongan Rp 50.000' sudah ada dari test Create sebelumnya)"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Nama duplikat harus 409', function () {",
+                  "    pm.response.to.have.status(409);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
