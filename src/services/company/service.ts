@@ -1,10 +1,41 @@
 import { Transaction } from 'sequelize';
-import { createCompany, findCompanyById, updateCompany, deleteCompany } from './repository';
+import {
+  createCompany,
+  findCompanyById,
+  findCompanyByCode,
+  updateCompany,
+  deleteCompany,
+} from './repository';
 import { findUserById } from '../users/repository';
 import { OWNER_ROLE } from '../users/model';
-import { NotFoundError, ForbiddenError } from '../../utils/app-error';
+import { NotFoundError, ForbiddenError, InternalServerError } from '../../utils/app-error';
 import { CompanyCreationAttributes } from './model';
 import { CreateCompanyInput, UpdateCompanyInput } from './types';
+
+// huruf kapital + angka, tanpa karakter yang mudah tertukar saat dibaca manusia (I, O, 0, 1)
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const CODE_LENGTH = 4;
+const MAX_CODE_ATTEMPTS = 10;
+
+const randomCode = (): string => {
+  let code = '';
+  for (let i = 0; i < CODE_LENGTH; i += 1) {
+    code += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
+  }
+  return code;
+};
+
+// company_code digenerate server (bukan input client): acak 4 karakter A-Z/0-9,
+// diulang kalau kebetulan sudah dipakai company lain
+const generateCompanyCode = async (t: Transaction): Promise<string> => {
+  for (let attempt = 0; attempt < MAX_CODE_ATTEMPTS; attempt += 1) {
+    const code = randomCode();
+    const existing = await findCompanyByCode(code, t);
+    if (!existing) return code;
+  }
+
+  throw new InternalServerError('Gagal membuat kode perusahaan, silakan coba lagi');
+};
 
 // owner_id tidak pernah dikirim client, tapi di-resolve dari requester:
 // - kalau requester owner → owner_id = user_id-nya sendiri
@@ -25,8 +56,9 @@ export const createCompanyService = async (
   t: Transaction
 ) => {
   const owner_id = await resolveOwnerId(requester, t);
+  const company_code = await generateCompanyCode(t);
 
-  return createCompany({ ...input, owner_id } as CompanyCreationAttributes, t);
+  return createCompany({ ...input, owner_id, company_code } as CompanyCreationAttributes, t);
 };
 
 export const updateCompanyService = async (
@@ -42,7 +74,18 @@ export const updateCompanyService = async (
     throw new ForbiddenError('Hanya owner pemilik company yang dapat mengupdate data ini');
   }
 
-  await updateCompany(id, input, t);
+  // field diambil eksplisit supaya company_code (digenerate server) dan kolom
+  // kepemilikan tidak bisa ikut tertimpa lewat body request
+  await updateCompany(
+    id,
+    {
+      ...(input.company_name !== undefined && { company_name: input.company_name }),
+      ...(input.company_cabang !== undefined && { company_cabang: input.company_cabang }),
+      ...(input.header_id !== undefined && { header_id: input.header_id }),
+      updated_by: input.updated_by,
+    },
+    t
+  );
 
   return findCompanyById(id, t);
 };

@@ -1,7 +1,8 @@
-import { Transaction, WhereOptions, OrderItem } from 'sequelize';
+import { Transaction, WhereOptions, OrderItem, Op } from 'sequelize';
 import {
   createProduct,
   findAllProducts,
+  countProductsByActive,
   findProductById,
   findProductByName,
   updateProduct,
@@ -11,9 +12,18 @@ import { generateSerialNumber } from '../naming-series/service';
 import { findUserById } from '../users/repository';
 import { findCompanyById, findCompanyByUserId } from '../company/repository';
 import { uploadDocumentService, updateDocumentService, deleteDocumentService } from '../documents/service';
+import { findFlexParamById } from '../flex-params/repository';
 import { OWNER_ROLE } from '../users/model';
 import { NotFoundError, ConflictError, BadRequestError } from '../../utils/app-error';
 import { CreateProductInput, UpdateProductInput } from './types';
+
+// request multipart/form-data mengirim semua nilai sebagai string, jadi "false" / "0"
+// harus dinormalkan — kalau tidak, string "false" dianggap truthy dan tersimpan sebagai true
+const toBoolean = (value: unknown): boolean => {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') return !['false', '0', '', 'null'].includes(value.toLowerCase().trim());
+  return Boolean(value);
+};
 
 export const resolveOwnerId = async (
   requester: { user_id: string; role: string },
@@ -23,7 +33,7 @@ export const resolveOwnerId = async (
     const company = await findCompanyByUserId(requester.user_id, t);
     return {
       owner_id: requester.user_id,
-      company_code: company?.id ? company.id.slice(0, 4).toUpperCase() : 'COMP',
+      company_code: company?.company_code ?? 'COMP',
     };
   }
 
@@ -35,7 +45,7 @@ export const resolveOwnerId = async (
 
   if (requesterUser.company_id) {
     const company = await findCompanyById(requesterUser.company_id, t);
-    if (company?.id) company_code = company.id.slice(0, 4).toUpperCase();
+    if (company?.company_code) company_code = company.company_code;
   }
 
   return { owner_id, company_code };
@@ -49,9 +59,13 @@ export const createProductService = async (
 ) => {
   if (!input.name) throw new BadRequestError('Validasi gagal', [{ field: 'name', message: 'Nama produk wajib diisi' }]);
   if (!input.category) throw new BadRequestError('Validasi gagal', [{ field: 'category', message: 'Kategori wajib diisi' }]);
+  if (!input.category_id) throw new BadRequestError('Validasi gagal', [{ field: 'category_id', message: 'Category ID wajib diisi' }]);
   if (!input.unit) throw new BadRequestError('Validasi gagal', [{ field: 'unit', message: 'Satuan wajib diisi' }]);
 
   const { owner_id, company_code } = await resolveOwnerId(requester, t);
+
+  const categoryParam = await findFlexParamById(input.category_id, t);
+  if (!categoryParam) throw new NotFoundError('Kategori tidak ditemukan');
 
   const duplicate = await findProductByName(input.name, owner_id, t);
   if (duplicate) {
@@ -61,7 +75,7 @@ export const createProductService = async (
   }
 
   const currentYear = new Date().getFullYear();
-  const sku = await generateSerialNumber('PROD', currentYear, company_code, t);
+  const sku = await generateSerialNumber('PRODUCT', owner_id, 'PROD', currentYear, company_code, t);
   const id = crypto.randomUUID();
 
   let photo_id: string | null = null;
@@ -89,12 +103,13 @@ export const createProductService = async (
       sku,
       name: input.name,
       category: input.category,
+      category_id: input.category_id,
       unit: input.unit,
       cost_price: Number(input.cost_price ?? 0),
       sell_price: Number(input.sell_price ?? 0),
       stock: Number(input.stock ?? 0),
       description: input.description ?? null,
-      active: input.active ?? true,
+      active: input.active !== undefined ? toBoolean(input.active) : true,
       photo_id,
       photo_url,
       user_id: requester.user_id,
@@ -112,12 +127,37 @@ export const getAllProductsService = async (
   order: OrderItem[],
   page: number,
   limit: number,
-  t: Transaction
+  t: Transaction,
+  search?: string
 ) => {
   const { owner_id } = await resolveOwnerId(requester, t);
-  const effectiveWhere = { ...where, owner_id };
 
-  return findAllProducts(effectiveWhere, order, page, limit, t);
+  // search dicari ke name ATAU sku (iLike = tidak peduli huruf besar/kecil).
+  // digabung sebagai [Op.and] supaya tidak menimpa kondisi dari `filter`
+  const keyword = search?.trim();
+  const effectiveWhere = {
+    ...where,
+    owner_id,
+    ...(keyword && {
+      [Op.and]: [
+        {
+          [Op.or]: [
+            { name: { [Op.iLike]: `%${keyword}%` } },
+            { sku: { [Op.iLike]: `%${keyword}%` } },
+          ],
+        },
+      ],
+    }),
+  };
+
+  const { rows, count } = await findAllProducts(effectiveWhere, order, page, limit, t);
+
+  // ringkasan aktif/tidak aktif dihitung tanpa kondisi `active` dari filter user,
+  // supaya saat user memfilter active=true angka total_inactive tidak jadi 0
+  const { active: _active, ...whereWithoutActive } = effectiveWhere as Record<string, unknown>;
+  const summary = await countProductsByActive(whereWithoutActive as WhereOptions, t);
+
+  return { rows, count, ...summary };
 };
 
 export const getProductByIdService = async (
@@ -158,6 +198,11 @@ export const updateProductService = async (
     }
   }
 
+  if (input.category_id) {
+    const categoryParam = await findFlexParamById(input.category_id, t);
+    if (!categoryParam) throw new NotFoundError('Kategori tidak ditemukan');
+  }
+
   let photo_id = product.photo_id;
   let photo_url = product.photo_url;
 
@@ -196,6 +241,7 @@ export const updateProductService = async (
       cost_price: input.cost_price !== undefined ? Number(input.cost_price) : product.cost_price,
       sell_price: input.sell_price !== undefined ? Number(input.sell_price) : product.sell_price,
       stock: input.stock !== undefined ? Number(input.stock) : product.stock,
+      ...(input.active !== undefined && { active: toBoolean(input.active) }),
       photo_id,
       photo_url,
       updated_by: requester.email,

@@ -4,6 +4,7 @@ import sequelize from '../../databases';
 export interface CompanyAttributes {
   id: string;
   company_name: string;
+  company_code: string;
   company_cabang: boolean;
   user_id: string;
   owner_id?: string | null;
@@ -22,6 +23,7 @@ export interface CompanyCreationAttributes
 class Company extends Model<CompanyAttributes, CompanyCreationAttributes> implements CompanyAttributes {
   declare id: string;
   declare company_name: string;
+  declare company_code: string;
   declare company_cabang: boolean;
   declare user_id: string;
   declare owner_id: string | null;
@@ -47,6 +49,20 @@ Company.init(
       validate: {
         notNull: { msg: 'Nama perusahaan wajib diisi' },
         notEmpty: { msg: 'Nama perusahaan tidak boleh kosong' },
+      },
+    },
+    // kode singkat perusahaan, dipakai sebagai bagian nomor dokumen (SKU, invoice, dll).
+    // digenerate acak oleh server (4 karakter A-Z/0-9), bukan dikirim client
+    company_code: {
+      type: DataTypes.STRING(4),
+      allowNull: false,
+      validate: {
+        notNull: { msg: 'Kode perusahaan wajib diisi' },
+        notEmpty: { msg: 'Kode perusahaan tidak boleh kosong' },
+        is: {
+          args: /^[A-Z0-9]{4}$/,
+          msg: 'Kode perusahaan harus 4 karakter huruf kapital atau angka',
+        },
       },
     },
     company_cabang: {

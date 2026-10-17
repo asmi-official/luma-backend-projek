@@ -30,8 +30,8 @@ export const findPaymentMethodById = async (id: string, t?: Transaction) => {
 
 export const findDuplicatePaymentMethod = async (
   owner_id: string,
-  key_payment_param_id: string,
-  method_payment_param_id: string,
+  key_payment_param_id: string | null,
+  payment_gateway_id: string,
   t?: Transaction,
   excludeId?: string
 ) => {
@@ -39,7 +39,7 @@ export const findDuplicatePaymentMethod = async (
     where: {
       owner_id,
       key_payment_param_id,
-      method_payment_param_id,
+      payment_gateway_id,
       ...(excludeId && { id: { [Op.ne]: excludeId } }),
     },
     transaction: t,

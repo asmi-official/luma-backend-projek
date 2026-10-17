@@ -16,6 +16,7 @@ const PRODUCT_FILTERABLE_KEYS = [
   'sku',
   'name',
   'category',
+  'category_id',
   'unit',
   'cost_price',
   'sell_price',
@@ -67,18 +68,23 @@ export const getAllProducts = async (req: Request, res: Response): Promise<void>
     const { user_id, role } = req.user!;
     const { where, order } = buildProductQueryOptions(req);
     const { page, limit } = parsePagination(req.query as Record<string, unknown>);
+    const { search } = req.query as { search?: string };
 
-    const { rows, count } = await getAllProductsService(
+    const { rows, count, total_active, total_inactive } = await getAllProductsService(
       { user_id, role },
       where,
       order,
       page,
       limit,
-      t
+      t,
+      search
     );
 
     await t.commit();
-    sendPaginated(res, rows, count, { page, limit }, 'Berhasil mengambil data produk');
+    sendPaginated(res, rows, count, { page, limit }, 'Berhasil mengambil data produk', {
+      total_active,
+      total_inactive,
+    });
   } catch (err) {
     await t.rollback();
     handleError(err, res);

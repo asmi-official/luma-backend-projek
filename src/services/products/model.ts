@@ -6,6 +6,7 @@ export interface ProductAttributes {
   sku: string;
   name: string;
   category: string;
+  category_id?: string | null;
   unit: string;
   cost_price: number;
   sell_price: number;
@@ -28,7 +29,15 @@ export interface ProductAttributes {
 export interface ProductCreationAttributes
   extends Optional<
     ProductAttributes,
-    'id' | 'description' | 'active' | 'photo_id' | 'photo_url' | 'company_id' | 'deleted_at' | 'deleted_by'
+    | 'id'
+    | 'category_id'
+    | 'description'
+    | 'active'
+    | 'photo_id'
+    | 'photo_url'
+    | 'company_id'
+    | 'deleted_at'
+    | 'deleted_by'
   > {}
 
 class Product extends Model<ProductAttributes, ProductCreationAttributes> implements ProductAttributes {
@@ -36,6 +45,7 @@ class Product extends Model<ProductAttributes, ProductCreationAttributes> implem
   declare sku: string;
   declare name: string;
   declare category: string;
+  declare category_id: string | null;
   declare unit: string;
   declare cost_price: number;
   declare sell_price: number;
@@ -83,6 +93,16 @@ Product.init(
       validate: {
         notNull: { msg: 'Kategori wajib diisi' },
         notEmpty: { msg: 'Kategori tidak boleh kosong' },
+      },
+    },
+    // referensi ke row flex_params kategori produk.
+    // nullable karena kolom `category` (string) masih dipakai dan data lama belum punya id-nya
+    category_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      defaultValue: null,
+      validate: {
+        isUUID: { args: 4, msg: 'Category ID harus berupa UUID valid' },
       },
     },
     unit: {
