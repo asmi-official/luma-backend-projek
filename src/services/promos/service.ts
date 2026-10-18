@@ -6,6 +6,9 @@ import {
   findPromoByName,
   countPromosByStatus,
   findActivePromos,
+  findPromosInPeriod,
+  findPromosOutsidePeriod,
+  bulkUpdatePromoStatus,
   updatePromo,
   toggleActivePromo,
   deletePromo,
@@ -421,4 +424,86 @@ export const deletePromoService = async (
   }
 
   await deletePromo(id, requester.email, t);
+};
+
+export interface SyncPromoStatusResult {
+  checked_at: string;
+  checked_time: string;
+  activated: number;    // Terjadwal → Aktif
+  finished: number;     // Aktif → Selesai
+  paused: number;       // Aktif → Terjadwal (di luar jam berlaku)
+}
+
+/**
+ * Selaraskan kolom `status` promo dengan periode berjalannya.
+ * Dipanggil worker secara berkala, bukan lewat HTTP.
+ *
+ * Jam ikut diperhitungkan kalau promo punya start_time/end_time:
+ *   - punya jam  → hanya Aktif saat jam sekarang masuk rentangnya
+ *   - tanpa jam  → berlaku sepanjang hari, cukup cek tanggal
+ *
+ * Transisi yang dilakukan:
+ *   Terjadwal → Aktif     : tanggal & jam sedang berjalan
+ *   Aktif     → Terjadwal : tanggal masih berlaku tapi jam sudah di luar rentang
+ *                           (menunggu jam berikutnya, mis. promo 08:00-12:00 pada jam 14:00)
+ *   Aktif     → Selesai   : end_date sudah lewat
+ *
+ * Yang sengaja TIDAK disentuh:
+ *   - status `Nonaktif` (disetel manual user, tidak boleh dihidupkan worker)
+ *   - promo `Terjadwal` yang end_date-nya sudah lewat tanpa pernah Aktif —
+ *     hanya promo ber-status Aktif yang boleh jadi Selesai
+ */
+export const syncPromoStatusService = async (
+  updated_by = 'system',
+  t?: Transaction,
+): Promise<SyncPromoStatusResult> => {
+  const now = new Date();
+  const today = now.toISOString().split('T')[0] as string;
+  const currentTime = now.toTimeString().slice(0, 8); // 'HH:mm:ss' waktu lokal server
+
+  // promo yang tanggal DAN jamnya sedang berjalan.
+  // promo tanpa jam otomatis lolos filter waktu (berlaku sepanjang hari)
+  const running = await findPromosInPeriod(
+    { date: today, start_time: currentTime, end_time: currentTime },
+    t,
+  );
+  const runningIds = new Set(running.map((promo) => promo.id));
+
+  const toActivate = running
+    .filter((promo) => promo.status === 'Terjadwal')
+    .map((promo) => promo.id);
+
+  // promo yang tanggalnya masih berlaku tapi TIDAK ikut hasil di atas
+  // berarti jamnya sedang di luar rentang → dikembalikan ke Terjadwal
+  const inDateRange = await findPromosInPeriod({ date: today }, t);
+  const toPause = inDateRange
+    .filter((promo) => promo.status === 'Aktif' && !runningIds.has(promo.id))
+    .map((promo) => promo.id);
+
+  // promo di luar periode → yang Aktif & end_date-nya sudah lewat ditandai selesai.
+  // promo yang belum mulai (start_date > today) tidak termasuk di sini
+  const outsidePeriod = await findPromosOutsidePeriod({ date: today }, t);
+  const toFinish = outsidePeriod
+    .filter((promo) => promo.status === 'Aktif' && promo.end_date < today)
+    .map((promo) => promo.id);
+
+  if (toActivate.length > 0) {
+    await bulkUpdatePromoStatus(toActivate, 'Aktif', updated_by, t);
+  }
+
+  if (toPause.length > 0) {
+    await bulkUpdatePromoStatus(toPause, 'Terjadwal', updated_by, t);
+  }
+
+  if (toFinish.length > 0) {
+    await bulkUpdatePromoStatus(toFinish, 'Selesai', updated_by, t);
+  }
+
+  return {
+    checked_at: today,
+    checked_time: currentTime,
+    activated: toActivate.length,
+    paused: toPause.length,
+    finished: toFinish.length,
+  };
 };

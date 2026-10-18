@@ -78,12 +78,19 @@ export const connectDB = async (): Promise<void> => {
   logger.info('Skip auto-sync, perubahan skema lewat migration (npm run migrate)');
 };
 
-// jalankan connectDB lalu start express server, jika gagal proses dihentikan
-export const startServer = (app: import('express').Application, port: string | number): void => {
+// jalankan connectDB lalu start express server, jika gagal proses dihentikan.
+// onReady dipanggil setelah server siap — dipakai untuk menyalakan worker,
+// lewat callback supaya layer database tidak perlu tahu soal worker
+export const startServer = (
+  app: import('express').Application,
+  port: string | number,
+  onReady?: () => void
+): void => {
   connectDB()
     .then(() => {
       app.listen(port, () => {
         logger.info(`Server running on http://localhost:${port}`);
+        onReady?.();
       });
     })
     .catch((err: unknown) => {

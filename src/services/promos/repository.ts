@@ -119,6 +119,93 @@ export const findPromoByName = async (
   });
 };
 
+/**
+ * Cari promo yang SEHARUSNYA berjalan pada tanggal (dan jam) tertentu.
+ * Dipakai worker untuk menyelaraskan kolom `status` dengan periode promo.
+ *
+ * - start_time / end_time OPSIONAL:
+ *   diisi  → jam ikut dicek, promo hanya cocok kalau waktunya masuk rentang jam
+ *   kosong → cukup tanggal saja, promo berlaku sepanjang hari
+ *
+ * - promo yang start_time/end_time-nya NULL di DB selalu lolos cek jam,
+ *   karena memang berlaku kapan saja sepanjang hari
+ *
+ * - status `Nonaktif` sengaja DIKECUALIKAN: itu disetel manual oleh user,
+ *   worker tidak boleh menghidupkannya kembali
+ */
+export const findPromosInPeriod = async (
+  params: {
+    date: string;          // 'YYYY-MM-DD'
+    start_time?: string | null;  // 'HH:mm:ss'
+    end_time?: string | null;
+    owner_id?: string;
+  },
+  t?: Transaction,
+) => {
+  const { date, start_time, end_time, owner_id } = params;
+
+  const timeConditions = [];
+
+  // promo yang punya start_time harus sudah lewat jam mulainya
+  if (start_time) {
+    timeConditions.push({
+      [Op.or]: [
+        { start_time: null },
+        { start_time: { [Op.lte]: start_time } },
+      ],
+    });
+  }
+
+  // promo yang punya end_time belum boleh lewat jam selesainya
+  if (end_time) {
+    timeConditions.push({
+      [Op.or]: [
+        { end_time: null },
+        { end_time: { [Op.gte]: end_time } },
+      ],
+    });
+  }
+
+  return Promo.findAll({
+    where: {
+      ...(owner_id && { owner_id }),
+      status: { [Op.ne]: 'Nonaktif' },
+      start_date: { [Op.lte]: date },
+      end_date: { [Op.gte]: date },
+      ...(timeConditions.length > 0 && { [Op.and]: timeConditions }),
+    },
+    order: [['start_date', 'ASC']],
+    transaction: t,
+  });
+};
+
+/**
+ * Kebalikannya: promo yang SUDAH TIDAK berjalan pada tanggal tertentu —
+ * entah karena belum mulai (start_date > date) atau sudah lewat (end_date < date).
+ * Dipakai worker untuk menandai promo jadi `Terjadwal` / `Selesai`.
+ *
+ * `Nonaktif` juga dikecualikan, dengan alasan yang sama.
+ */
+export const findPromosOutsidePeriod = async (
+  params: { date: string; owner_id?: string },
+  t?: Transaction,
+) => {
+  const { date, owner_id } = params;
+
+  return Promo.findAll({
+    where: {
+      ...(owner_id && { owner_id }),
+      status: { [Op.ne]: 'Nonaktif' },
+      [Op.or]: [
+        { start_date: { [Op.gt]: date } },
+        { end_date: { [Op.lt]: date } },
+      ],
+    },
+    order: [['start_date', 'ASC']],
+    transaction: t,
+  });
+};
+
 export const findActivePromos = async (
   owner_id: string,
   t?: Transaction,
@@ -143,6 +230,22 @@ export const updatePromo = async (
   t?: Transaction,
 ) => {
   return Promo.update(data, { where: { id }, transaction: t });
+};
+
+// ubah status banyak promo sekaligus (1 query UPDATE ... WHERE id IN (...)),
+// dipakai worker supaya tidak update satu per satu
+export const bulkUpdatePromoStatus = async (
+  ids: string[],
+  status: PromoStatus,
+  updated_by: string,
+  t?: Transaction,
+) => {
+  if (ids.length === 0) return [0];
+
+  return Promo.update(
+    { status, updated_by },
+    { where: { id: ids }, transaction: t },
+  );
 };
 
 // ubah status promo (Aktif / Terjadwal / Nonaktif / Selesai)

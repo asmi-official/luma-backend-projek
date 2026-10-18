@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { startServer } from './databases';
+import { startWorkers } from './worker';
 import httpLogger from './middlewares/http-logger';
 import router from './router/indext';
 
@@ -29,6 +30,7 @@ app.get('/', (_req, res) => {
 
 app.use('/api', router);
 
-startServer(app, PORT);
+// worker dinyalakan setelah database & server siap
+startServer(app, PORT, startWorkers);
 
 export default app;
