@@ -8,6 +8,7 @@ import paymentMethodRoute from "../services/payment-methods/router";
 import productRoute from "../services/products/route";
 import paymentGatewayRoute from "../services/payment-gateway/route";
 import promoRoute from "../services/promos/route";
+import cabangRoute from "../services/cabang/router";
 
 const router = Router();
 
@@ -20,5 +21,6 @@ router.use("/payment-methods", paymentMethodRoute);
 router.use("/products", productRoute);
 router.use("/payment-gateway", paymentGatewayRoute);
 router.use("/promos", promoRoute);
+router.use("/cabangs", cabangRoute);
 
 export default router;
