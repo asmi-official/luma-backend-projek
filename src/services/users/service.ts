@@ -8,6 +8,7 @@ import { RegisterInput, LoginInput, CreateEmployeeInput, UpdateProfileInput } fr
 import { createCompanyService } from '../company/service';
 import { findCompanyById, findCompanyByUserId } from '../company/repository';
 import { uploadDocumentService, updateDocumentService } from '../documents/service';
+import { findKaryawanByUserId, touchKaryawanLastLogin } from '../karyawan/repository';
 
 // resolve owner_id (pemilik grup usaha) dari seorang user:
 // - kalau dia owner, cari salah satu Company miliknya lalu ambil user_id (dirinya sendiri)
@@ -268,6 +269,15 @@ export const loginService = async (input: LoginInput, t: Transaction) => {
       { field: 'password', message: 'Password salah' },
     ]);
   }
+
+  // Owner dan akun lama yang belum mempunyai profil karyawan tetap dapat login.
+  // Tetapi akun yang terhubung ke karyawan mengikuti status akses pada modul Karyawan.
+  const karyawan = await findKaryawanByUserId(user.id, t);
+  if (karyawan && !karyawan.active) {
+    throw new UnauthorizedError('Akses login karyawan sedang dinonaktifkan');
+  }
+
+  if (karyawan) await touchKaryawanLastLogin(user.id, t);
 
   return {
     ...generateTokenPair({ user_id: user.id, email: user.email, role: user.role, username: user.username }),

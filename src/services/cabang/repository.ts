@@ -1,21 +1,43 @@
 import Cabang, { CabangCreationAttributes } from './model';
-import { Transaction, WhereOptions } from 'sequelize';
+import { Transaction, WhereOptions, OrderItem, fn, col } from 'sequelize';
 
-export const findAllCabangs = async (where: WhereOptions, order: any[], t?: Transaction) => {
-  const result = await Cabang.findAndCountAll({
+export const findAllCabangs = async (
+  where: WhereOptions,
+  order: OrderItem[],
+  page: number,
+  limit: number,
+  t?: Transaction
+) => {
+  return Cabang.findAndCountAll({
     where,
     order: order.length ? order : [['created_at', 'DESC']],
+    limit,
+    offset: (page - 1) * limit,
     transaction: t,
   });
+};
 
-  return {
-    status: 'success',
-    message: 'Berhasil mengambil data cabang',
-    data: result.rows,
-    meta: {
-      total: result.count,
-    },
-  };
+export const countCabangsByActive = async (
+  where: WhereOptions,
+  t?: Transaction
+): Promise<{ total_active: number; total_inactive: number }> => {
+  const rows = (await Cabang.findAll({
+    where,
+    attributes: ['active', [fn('COUNT', col('id')), 'total']],
+    group: ['active'],
+    raw: true,
+    transaction: t,
+  })) as unknown as { active: boolean; total: string }[];
+
+  let total_active = 0;
+  let total_inactive = 0;
+
+  for (const row of rows) {
+    if (row.active) total_active = Number(row.total);
+    else total_inactive = Number(row.total);
+  }
+
+  return { total_active, total_inactive };
 };
 
 export const findCabangById = async (id: string, t?: Transaction) => {
