@@ -1,21 +1,21 @@
-import { Router } from 'express';
-import { authenticate } from '../../middlewares/authenticate';
+import { Router } from "express";
+import { authenticate } from "../../middlewares/authenticate";
 import {
   createCabang,
+  getCabangFilterOptions,
   getAllCabangs,
   getCabangById,
   updateCabang,
   deleteCabang,
-} from './controller';
+} from "./controller";
 
 const router = Router();
 
-router.use(authenticate);
-
-router.post('/', createCabang);
-router.get('/', getAllCabangs);
-router.get('/:id', getCabangById);
-router.put('/:id', updateCabang);
-router.delete('/:id', deleteCabang);
+router.post("/", authenticate, createCabang);
+router.get("/filter-options", getCabangFilterOptions);
+router.get("/", authenticate, getAllCabangs);
+router.get("/:id", authenticate, getCabangById);
+router.put("/:id", authenticate, updateCabang);
+router.delete("/:id", authenticate, deleteCabang);
 
 export default router;

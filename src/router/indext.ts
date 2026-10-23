@@ -9,6 +9,7 @@ import productRoute from "../services/products/route";
 import paymentGatewayRoute from "../services/payment-gateway/route";
 import promoRoute from "../services/promos/route";
 import cabangRoute from "../services/cabang/router";
+import karyawanRoute from "../services/karyawan/router";
 
 const router = Router();
 
@@ -22,5 +23,6 @@ router.use("/products", productRoute);
 router.use("/payment-gateway", paymentGatewayRoute);
 router.use("/promos", promoRoute);
 router.use("/cabangs", cabangRoute);
+router.use("/karyawan", karyawanRoute);
 
 export default router;
